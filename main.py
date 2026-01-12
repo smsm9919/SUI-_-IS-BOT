@@ -606,21 +606,21 @@ def detect_early_trend(df, ind):
         sma_20 = close.rolling(20).mean()
         
         # اتجاه المتوسطات
-        ema_trend = "bull" if float(ema_20.iloc[-1]) > float(ema_50.iloc[-1]) else "bear"
-        price_vs_ema = "bull" if float(close.iloc[-1]) > float(ema_20.iloc[-1]) else "bear"
+        ema_trend = "bull" if ema_20.iloc[-1] > ema_50.iloc[-1] else "bear"
+        price_vs_ema = "bull" if close.iloc[-1] > ema_20.iloc[-1] else "bear"
         
         # قوة الحركة
-        momentum_5 = ((float(close.iloc[-1]) - float(close.iloc[-5])) / float(close.iloc[-5])) * 100
-        momentum_10 = ((float(close.iloc[-1]) - float(close.iloc[-10])) / float(close.iloc[-10])) * 100
+        momentum_5 = ((close.iloc[-1] - close.iloc[-5]) / close.iloc[-5]) * 100
+        momentum_10 = ((close.iloc[-1] - close.iloc[-10]) / close.iloc[-10]) * 100
         
         # تحليل الحجم
         volume_ma = volume.rolling(20).mean()
-        volume_spike = float(volume.iloc[-1]) > float(volume_ma.iloc[-1]) * 1.5
+        volume_spike = volume.iloc[-1] > volume_ma.iloc[-1] * 1.5
         
         # تحليل التقلب
         atr = safe_get(ind, 'atr', 0)
         recent_atr = (high - low).rolling(5).mean().iloc[-1]
-        volatility_ratio = float(recent_atr) / atr if atr > 0 else 1.0
+        volatility_ratio = recent_atr / atr if atr > 0 else 1.0
         
         score_bull = 0.0
         score_bear = 0.0
@@ -634,7 +634,7 @@ def detect_early_trend(df, ind):
             score_bull += 1.0
         if momentum_10 > 1.0:
             score_bull += 1.5
-        if volume_spike and float(close.iloc[-1]) > float(close.iloc[-2]):
+        if volume_spike and close.iloc[-1] > close.iloc[-2]:
             score_bull += 1.5
         
         # تصويت الاتجاه الهابط
@@ -646,7 +646,7 @@ def detect_early_trend(df, ind):
             score_bear += 1.0
         if momentum_10 < -1.0:
             score_bear += 1.5
-        if volume_spike and float(close.iloc[-1]) < float(close.iloc[-2]):
+        if volume_spike and close.iloc[-1] < close.iloc[-2]:
             score_bear += 1.5
         
         # تحديد الاتجاه النهائي
@@ -691,17 +691,17 @@ def detect_breakout_opportunity(df, ind):
         resistance = high.rolling(20).max()
         support = low.rolling(20).min()
         
-        current_high = float(high.iloc[-1])
-        current_low = float(low.iloc[-1])
-        current_close = float(close.iloc[-1])
+        current_high = high.iloc[-1]
+        current_low = low.iloc[-1]
+        current_close = close.iloc[-1]
         
         # تحليل الاختراق
-        breakout_up = current_close > float(resistance.iloc[-2]) and current_high > float(resistance.iloc[-2])
-        breakout_down = current_close < float(support.iloc[-2]) and current_low < float(support.iloc[-2])
+        breakout_up = current_close > resistance.iloc[-2] and current_high > resistance.iloc[-2]
+        breakout_down = current_close < support.iloc[-2] and current_low < support.iloc[-2]
         
         # تأكيد الحجم
         volume_ma = volume.rolling(20).mean()
-        volume_confirmation = float(volume.iloc[-1]) > float(volume_ma.iloc[-1]) * 1.2
+        volume_confirmation = volume.iloc[-1] > volume_ma.iloc[-1] * 1.2
         
         # قوة الاختراق
         strength = 0.0
@@ -710,16 +710,16 @@ def detect_breakout_opportunity(df, ind):
         if breakout_up and volume_confirmation:
             direction = "up"
             # حساب قوة الاختراق
-            breakout_power = (current_close - float(resistance.iloc[-2])) / float(resistance.iloc[-2]) * 100
+            breakout_power = (current_close - resistance.iloc[-2]) / resistance.iloc[-2] * 100
             strength = min(10.0, breakout_power * 10)
-            strength += 2.0 if float(volume.iloc[-1]) > float(volume_ma.iloc[-1]) * 1.5 else 0.0
+            strength += 2.0 if volume.iloc[-1] > volume_ma.iloc[-1] * 1.5 else 0.0
             
         elif breakout_down and volume_confirmation:
             direction = "down"
             # حساب قوة الاختراق
-            breakout_power = (float(support.iloc[-2]) - current_close) / float(support.iloc[-2]) * 100
+            breakout_power = (support.iloc[-2] - current_close) / support.iloc[-2] * 100
             strength = min(10.0, breakout_power * 10)
-            strength += 2.0 if float(volume.iloc[-1]) > float(volume_ma.iloc[-1]) * 1.5 else 0.0
+            strength += 2.0 if volume.iloc[-1] > volume_ma.iloc[-1] * 1.5 else 0.0
         
         return {
             "breakout": direction != "none",
@@ -834,7 +834,7 @@ def emit_snapshots(exchange, symbol, df, balance_fn=None, pnl_fn=None):
         flow = compute_flow_metrics(df)
         cv = council_votes_pro(df)
         mode = decide_strategy_mode(df)
-        gz = golden_zone_check(df, {"adx": safe_get(cv.get("ind", {}), 'adx', 0)}, "buy" if cv["b"]>=cv["s"] else "sell")
+        gz = golden_zone_check(df, {"adx": cv["ind"].get("adx", 0)}, "buy" if cv["b"]>=cv["s"] else "sell")
 
         bal = None; cpnl = None
         if callable(balance_fn):
@@ -860,8 +860,8 @@ def emit_snapshots(exchange, symbol, df, balance_fn=None, pnl_fn=None):
         side_hint = "BUY" if cv["b"]>=cv["s"] else "SELL"
         dash = (f"DASH → hint-{side_hint} | Council BUY({cv['b']},{cv['score_b']:.1f}) "
                 f"SELL({cv['s']},{cv['score_s']:.1f}) | "
-                f"RSI={safe_get(cv.get('ind', {}),'rsi',0):.1f} ADX={safe_get(cv.get('ind', {}),'adx',0):.1f} "
-                f"DI={safe_get(cv.get('ind', {}),'di_spread',0):.1f} | Confidence: {cv.get('confidence',0):.1f}")
+                f"RSI={safe_get(cv['ind'],'rsi',0):.1f} ADX={safe_get(cv['ind'],'adx',0):.1f} "
+                f"DI={safe_get(cv['ind'],'di_spread',0):.1f} | Confidence: {cv.get('confidence',0):.1f}")
 
         strat_icon = "⚡" if mode["mode"]=="scalp" else "📈" if mode["mode"]=="trend" else "ℹ️"
         strat = f"Strategy: {strat_icon} {mode['mode'].upper()}"
@@ -890,7 +890,7 @@ def emit_snapshots(exchange, symbol, df, balance_fn=None, pnl_fn=None):
             bm_imb = bm['imbalance'] if bm and bm.get('ok') else 1.0
             
             print(f"🧠 SNAP | {side_hint} | votes={cv['b']}/{cv['s']} score={cv['score_b']:.1f}/{cv['score_s']:.1f} "
-                  f"| ADX={safe_get(cv.get('ind', {}),'adx',0):.1f} DI={safe_get(cv.get('ind', {}),'di_spread',0):.1f} | "
+                  f"| ADX={safe_get(cv['ind'],'adx',0):.1f} DI={safe_get(cv['ind'],'di_spread',0):.1f} | "
                   f"z={flow_z:.2f} | imb={bm_imb:.2f}{gz_snap_note}", 
                   flush=True)
             
@@ -949,20 +949,10 @@ def compute_volume_profile(df, period=20):
     price_range = high - low
     volume_per_price = volume / (price_range.replace(0, 1e-12))
     
-    volume_ma = sma(volume, period)
-    
-    # استخراج القيم الأخيرة
-    volume_ma_last = float(volume_ma.iloc[-1]) if len(volume_ma) > 0 else 0
-    volume_last = float(volume.iloc[-1]) if len(volume) > 0 else 0
-    volume_spike = volume_last > volume_ma_last * 1.5
-    
-    volume_prev = float(volume.iloc[-2]) if len(volume) >= 2 else 0
-    volume_trend = 'up' if volume_last > volume_prev else 'down'
-    
     return {
-        'volume_ma': volume_ma_last,
-        'volume_spike': volume_spike,
-        'volume_trend': volume_trend
+        'volume_ma': sma(volume, period),
+        'volume_spike': volume > sma(volume, period) * 1.5,
+        'volume_trend': 'up' if volume.iloc[-1] > volume.iloc[-2] else 'down'
     }
 
 def compute_momentum_indicators(df):
@@ -970,32 +960,15 @@ def compute_momentum_indicators(df):
     high = df['high'].astype(float)
     low = df['low'].astype(float)
     
-    if len(close) >= 5:
-        roc = ((float(close.iloc[-1]) - float(close.iloc[-5])) / float(close.iloc[-5])) * 100
-    else:
-        roc = 0
-    
-    if len(close) >= 3:
-        price_accel = float(close.iloc[-1]) - 2*float(close.iloc[-2]) + float(close.iloc[-3])
-    else:
-        price_accel = 0
-    
-    if len(high) > 0 and len(low) > 0:
-        volatility = float(high.iloc[-1]) - float(low.iloc[-1])
-    else:
-        volatility = 0
-    
-    if len(high) >= 20 and len(low) >= 20:
-        volatility_series = high.astype(float) - low.astype(float)
-        volatility_ma = float(volatility_series.rolling(20).mean().iloc[-1])
-    else:
-        volatility_ma = volatility
+    roc = ((close - close.shift(5)) / close.shift(5)) * 100
+    price_accel = close.diff().diff()
+    volatility = high - low
     
     return {
-        'roc': roc,
-        'price_accel': price_accel,
-        'volatility': volatility,
-        'volatility_ma': volatility_ma
+        'roc': roc.iloc[-1] if len(roc) > 0 else 0,
+        'price_accel': price_accel.iloc[-1] if len(price_accel) > 0 else 0,
+        'volatility': volatility.iloc[-1] if len(volatility) > 0 else 0,
+        'volatility_ma': sma(volatility, 20).iloc[-1] if len(volatility) >= 20 else 0
     }
 
 def compute_trend_strength(df, ind):
@@ -1004,21 +977,13 @@ def compute_trend_strength(df, ind):
     plus_di = safe_get(ind, 'plus_di', 0)
     minus_di = safe_get(ind, 'minus_di', 0)
     
-    if len(close) >= 5:
-        momentum_5 = ((float(close.iloc[-1]) - float(close.iloc[-5])) / float(close.iloc[-5])) * 100
-    else:
-        momentum_5 = 0
-    
-    if len(close) >= 10:
-        momentum_10 = ((float(close.iloc[-1]) - float(close.iloc[-10])) / float(close.iloc[-10])) * 100
-    else:
-        momentum_10 = 0
+    momentum_5 = ((close.iloc[-1] - close.iloc[-5]) / close.iloc[-5]) * 100 if len(close) >= 5 else 0
+    momentum_10 = ((close.iloc[-1] - close.iloc[-10]) / close.iloc[-10]) * 100 if len(close) >= 10 else 0
     
     trend_consistency = 0
     if len(close) >= 10:
-        diff = close.diff().tail(10)
-        up_days = sum(diff > 0)
-        down_days = sum(diff < 0)
+        up_days = sum(close.diff().tail(10) > 0)
+        down_days = sum(close.diff().tail(10) < 0)
         trend_consistency = max(up_days, down_days) / 10.0
     
     if adx > 40 and abs(momentum_5) > 3.0 and trend_consistency > 0.7:
@@ -1058,15 +1023,15 @@ def rsi_ma_context(df):
     
     cross = "none"
     if len(rsi) >= 2:
-        if (float(rsi.iloc[-2]) <= float(rsi_ma.iloc[-2])) and (float(rsi.iloc[-1]) > float(rsi_ma.iloc[-1])):
+        if (rsi.iloc[-2] <= rsi_ma.iloc[-2]) and (rsi.iloc[-1] > rsi_ma.iloc[-1]):
             cross = "bull"
-        elif (float(rsi.iloc[-2]) >= float(rsi_ma.iloc[-2])) and (float(rsi.iloc[-1]) < float(rsi_ma.iloc[-1])):
+        elif (rsi.iloc[-2] >= rsi_ma.iloc[-2]) and (rsi.iloc[-1] < rsi_ma.iloc[-1]):
             cross = "bear"
     
     above = (rsi > rsi_ma)
     below = (rsi < rsi_ma)
-    persist_bull = bool(above.tail(RSI_TREND_PERSIST).all()) if len(above) >= RSI_TREND_PERSIST else False
-    persist_bear = bool(below.tail(RSI_TREND_PERSIST).all()) if len(below) >= RSI_TREND_PERSIST else False
+    persist_bull = above.tail(RSI_TREND_PERSIST).all() if len(above) >= RSI_TREND_PERSIST else False
+    persist_bear = below.tail(RSI_TREND_PERSIST).all() if len(below) >= RSI_TREND_PERSIST else False
     
     current_rsi = float(rsi.iloc[-1])
     in_chop = RSI_NEUTRAL_BAND[0] <= current_rsi <= RSI_NEUTRAL_BAND[1]
@@ -1186,7 +1151,7 @@ def _displacement_gz(closes):
     if len(closes) < 22:
         return 0.0
     recent_std = closes.tail(20).std()
-    return abs(float(closes.iloc[-1]) - float(closes.iloc[-2])) / max(float(recent_std), 1e-9)
+    return abs(closes.iloc[-1] - closes.iloc[-2]) / max(recent_std, 1e-9)
 
 def _last_impulse_gz(df):
     h = df["high"].astype(float)
@@ -1199,8 +1164,8 @@ def _last_impulse_gz(df):
     hh_idx = recent_highs.idxmax()
     ll_idx = recent_lows.idxmin()
     
-    hh = float(recent_highs.max())
-    ll = float(recent_lows.min())
+    hh = recent_highs.max()
+    ll = recent_lows.min()
     
     if hh_idx < ll_idx:
         return ("down", hh_idx, ll_idx, hh, ll)
@@ -1247,7 +1212,7 @@ def golden_zone_check(df, ind=None, side_hint=None):
         
         body, up_wick, low_wick = _body_wicks_gz(current_high, current_low, current_open, last_close)
         
-        vol_ma = float(v.rolling(VOL_MA_LEN).mean().iloc[-1])
+        vol_ma = v.rolling(VOL_MA_LEN).mean().iloc[-1]
         vol_ok = float(v.iloc[-1]) >= vol_ma * 0.9
         
         rsi_series = _rsi_fallback_gz(c, RSI_LEN_GZ)
@@ -1360,9 +1325,9 @@ def detect_smc_structure(df):
         bos_points = []
         for i in range(BOS_LOOKBACK, len(df)-5):
             # تأكيد اختراق الهيكل الصاعد
-            if (float(closes.iloc[i]) > float(highs.iloc[i-5:i].max()) and 
-                float(closes.iloc[i+1]) > float(closes.iloc[i]) and
-                float(volumes.iloc[i]) > float(volumes.iloc[i-10:i].mean()) * 1.5):
+            if (closes.iloc[i] > highs.iloc[i-5:i].max() and 
+                closes.iloc[i+1] > closes.iloc[i] and
+                volumes.iloc[i] > volumes.iloc[i-10:i].mean() * 1.5):
                 bos_points.append({
                     "type": "bullish_bos",
                     "idx": i,
@@ -1372,9 +1337,9 @@ def detect_smc_structure(df):
                 })
             
             # تأكيد اختراق الهيكل الهابط
-            if (float(closes.iloc[i]) < float(lows.iloc[i-5:i].min()) and 
-                float(closes.iloc[i+1]) < float(closes.iloc[i]) and
-                float(volumes.iloc[i]) > float(volumes.iloc[i-10:i].mean()) * 1.5):
+            if (closes.iloc[i] < lows.iloc[i-5:i].min() and 
+                closes.iloc[i+1] < closes.iloc[i] and
+                volumes.iloc[i] > volumes.iloc[i-10:i].mean() * 1.5):
                 bos_points.append({
                     "type": "bearish_bos",
                     "idx": i,
@@ -1387,9 +1352,9 @@ def detect_smc_structure(df):
         choch_points = []
         for i in range(CHOC_LOOKBACK, len(df)-10):
             # اكتشاف تحول من صاعد إلى هابط
-            if (float(highs.iloc[i]) > float(highs.iloc[i-5:i].max()) and
-                float(lows.iloc[i+1]) < float(lows.iloc[i-5:i].min()) and
-                float(closes.iloc[i+2]) < float(opens.iloc[i+2])):
+            if (highs.iloc[i] > highs.iloc[i-5:i].max() and
+                lows.iloc[i+1] < lows.iloc[i-5:i].min() and
+                closes.iloc[i+2] < opens.iloc[i+2]):
                 choch_points.append({
                     "type": "bull_to_bear",
                     "idx": i,
@@ -1399,9 +1364,9 @@ def detect_smc_structure(df):
                 })
             
             # اكتشاف تحول من هابط إلى صاعد
-            if (float(lows.iloc[i]) < float(lows.iloc[i-5:i].min()) and
-                float(highs.iloc[i+1]) > float(highs.iloc[i-5:i].max()) and
-                float(closes.iloc[i+2]) > float(opens.iloc[i+2])):
+            if (lows.iloc[i] < lows.iloc[i-5:i].min() and
+                highs.iloc[i+1] > highs.iloc[i-5:i].max() and
+                closes.iloc[i+2] > opens.iloc[i+2]):
                 choch_points.append({
                     "type": "bear_to_bull",
                     "idx": i,
@@ -1416,8 +1381,8 @@ def detect_smc_structure(df):
         
         for i in range(lookback, len(df)-10):
             # سيولة عليا (Buy Stops)
-            current_high = float(highs.iloc[i])
-            if current_high > float(highs.iloc[i-lookback:i].max()):
+            current_high = highs.iloc[i]
+            if current_high > highs.iloc[i-lookback:i].max():
                 zone_start = current_high * (1 - LIQUIDITY_ZONE_WIDTH)
                 zone_end = current_high * (1 + LIQUIDITY_ZONE_WIDTH/2)
                 liquidity_pools.append({
@@ -1429,8 +1394,8 @@ def detect_smc_structure(df):
                 })
             
             # سيولة سفلية (Sell Stops)
-            current_low = float(lows.iloc[i])
-            if current_low < float(lows.iloc[i-lookback:i].min()):
+            current_low = lows.iloc[i]
+            if current_low < lows.iloc[i-lookback:i].min():
                 zone_start = current_low * (1 - LIQUIDITY_ZONE_WIDTH/2)
                 zone_end = current_low * (1 + LIQUIDITY_ZONE_WIDTH)
                 liquidity_pools.append({
@@ -1445,12 +1410,12 @@ def detect_smc_structure(df):
         orderblocks = []
         for i in range(ORDERBLOCK_LOOKBACK, len(df)-3):
             # Bullish Order Block (سعر مغلق أعلى من مفتوح بعد هبوط)
-            if (float(closes.iloc[i]) > float(opens.iloc[i]) and
-                float(closes.iloc[i-1]) < float(opens.iloc[i-1]) and
-                float(closes.iloc[i]) > float(closes.iloc[i-1]) and
-                float(volumes.iloc[i]) > float(volumes.iloc[i-5:i].mean()) * 1.3):
-                ob_high = max(float(opens.iloc[i]), float(closes.iloc[i]))
-                ob_low = min(float(opens.iloc[i]), float(closes.iloc[i]))
+            if (closes.iloc[i] > opens.iloc[i] and
+                closes.iloc[i-1] < opens.iloc[i-1] and
+                closes.iloc[i] > closes.iloc[i-1] and
+                volumes.iloc[i] > volumes.iloc[i-5:i].mean() * 1.3):
+                ob_high = max(opens.iloc[i], closes.iloc[i])
+                ob_low = min(opens.iloc[i], closes.iloc[i])
                 orderblocks.append({
                     "type": "bullish_ob",
                     "idx": i,
@@ -1461,12 +1426,12 @@ def detect_smc_structure(df):
                 })
             
             # Bearish Order Block (سعر مغلق أقل من مفتوح بعد صعود)
-            if (float(closes.iloc[i]) < float(opens.iloc[i]) and
-                float(closes.iloc[i-1]) > float(opens.iloc[i-1]) and
-                float(closes.iloc[i]) < float(closes.iloc[i-1]) and
-                float(volumes.iloc[i]) > float(volumes.iloc[i-5:i].mean()) * 1.3):
-                ob_high = max(float(opens.iloc[i]), float(closes.iloc[i]))
-                ob_low = min(float(opens.iloc[i]), float(closes.iloc[i]))
+            if (closes.iloc[i] < opens.iloc[i] and
+                closes.iloc[i-1] > opens.iloc[i-1] and
+                closes.iloc[i] < closes.iloc[i-1] and
+                volumes.iloc[i] > volumes.iloc[i-5:i].mean() * 1.3):
+                ob_high = max(opens.iloc[i], closes.iloc[i])
+                ob_low = min(opens.iloc[i], closes.iloc[i])
                 orderblocks.append({
                     "type": "bearish_ob",
                     "idx": i,
@@ -1480,24 +1445,24 @@ def detect_smc_structure(df):
         fvg_zones = []
         for i in range(2, len(df)):
             # FVG صاعد
-            if (float(lows.iloc[i]) > float(highs.iloc[i-2]) and
-                (float(lows.iloc[i]) - float(highs.iloc[i-2])) > float(highs.iloc[i-2]) * FVG_GAP_RATIO):
+            if (lows.iloc[i] > highs.iloc[i-2] and
+                (lows.iloc[i] - highs.iloc[i-2]) > highs.iloc[i-2] * FVG_GAP_RATIO):
                 fvg_zones.append({
                     "type": "bullish_fvg",
                     "top": float(highs.iloc[i-2]),
                     "bottom": float(lows.iloc[i]),
-                    "gap_size": float((float(lows.iloc[i]) - float(highs.iloc[i-2])) / float(highs.iloc[i-2]) * 100),
+                    "gap_size": float((lows.iloc[i] - highs.iloc[i-2]) / highs.iloc[i-2] * 100),
                     "time": int(df['time'].iloc[i])
                 })
             
             # FVG هابط
-            if (float(highs.iloc[i]) < float(lows.iloc[i-2]) and
-                (float(lows.iloc[i-2]) - float(highs.iloc[i])) > float(lows.iloc[i-2]) * FVG_GAP_RATIO):
+            if (highs.iloc[i] < lows.iloc[i-2] and
+                (lows.iloc[i-2] - highs.iloc[i]) > lows.iloc[i-2] * FVG_GAP_RATIO):
                 fvg_zones.append({
                     "type": "bearish_fvg",
                     "top": float(lows.iloc[i-2]),
                     "bottom": float(highs.iloc[i]),
-                    "gap_size": float((float(lows.iloc[i-2]) - float(highs.iloc[i])) / float(lows.iloc[i-2]) * 100),
+                    "gap_size": float((lows.iloc[i-2] - highs.iloc[i]) / lows.iloc[i-2] * 100),
                     "time": int(df['time'].iloc[i])
                 })
         
@@ -1525,25 +1490,25 @@ def analyze_liquidity_sweep(df, current_price):
     volumes = df['volume'].astype(float).tail(20)
     
     # اكتشاف سحب السيولة العليا
-    if current_price > float(highs.max()):
-        volume_spike = float(volumes.iloc[-1]) > float(volumes.mean()) * 1.8
+    if current_price > highs.max():
+        volume_spike = volumes.iloc[-1] > volumes.mean() * 1.8
         return {
             "sweep": True,
             "direction": "buy_stops_sweep",
-            "strength": min(10.0, (current_price - float(highs.max())) / float(highs.max()) * 1000),
+            "strength": min(10.0, (current_price - highs.max()) / highs.max() * 1000),
             "volume_confirmed": volume_spike,
-            "target_zone": float(highs.max()) * 0.995  # منطقة ارتداد متوقعة
+            "target_zone": highs.max() * 0.995  # منطقة ارتداد متوقعة
         }
     
     # اكتشاف سحب السيولة السفلية
-    if current_price < float(lows.min()):
-        volume_spike = float(volumes.iloc[-1]) > float(volumes.mean()) * 1.8
+    if current_price < lows.min():
+        volume_spike = volumes.iloc[-1] > volumes.mean() * 1.8
         return {
             "sweep": True,
             "direction": "sell_stops_sweep",
-            "strength": min(10.0, (float(lows.min()) - current_price) / float(lows.min()) * 1000),
+            "strength": min(10.0, (lows.min() - current_price) / lows.min() * 1000),
             "volume_confirmed": volume_spike,
-            "target_zone": float(lows.min()) * 1.005  # منطقة ارتداد متوقعة
+            "target_zone": lows.min() * 1.005  # منطقة ارتداد متوقعة
         }
     
     return {"sweep": False, "direction": None, "strength": 0}
@@ -1567,27 +1532,27 @@ def detect_fake_breakout(df, current_price):
     recent_volumes = volumes.tail(10)
     
     # اختراق وهمي صاعد
-    if (current_price > float(recent_highs.max()) and
-        float(closes.iloc[-1]) < float(recent_highs.max()) and
-        float(recent_volumes.iloc[-1]) < float(recent_volumes.mean()) * FAKEOUT_VOLUME_RATIO):
+    if (current_price > recent_highs.max() and
+        closes.iloc[-1] < recent_highs.max() and
+        recent_volumes.iloc[-1] < recent_volumes.mean() * FAKEOUT_VOLUME_RATIO):
         return {
             "fake_breakout": True,
             "type": "bull_fakeout",
             "confidence": 0.8,
             "rejection_level": float(recent_highs.max()),
-            "target": float(recent_highs.max()) * 0.99
+            "target": float(recent_highs.max() * 0.99)
         }
     
     # اختراق وهمي هابط
-    if (current_price < float(recent_lows.min()) and
-        float(closes.iloc[-1]) > float(recent_lows.min()) and
-        float(recent_volumes.iloc[-1]) < float(recent_volumes.mean()) * FAKEOUT_VOLUME_RATIO):
+    if (current_price < recent_lows.min() and
+        closes.iloc[-1] > recent_lows.min() and
+        recent_volumes.iloc[-1] < recent_volumes.mean() * FAKEOUT_VOLUME_RATIO):
         return {
             "fake_breakout": True,
             "type": "bear_fakeout",
             "confidence": 0.8,
             "rejection_level": float(recent_lows.min()),
-            "target": float(recent_lows.min()) * 1.01
+            "target": float(recent_lows.min() * 1.01)
         }
     
     return {"fake_breakout": False, "type": None, "confidence": 0}
@@ -1601,9 +1566,9 @@ def calculate_pivot_points(df):
         return {"pivot": 0, "supports": [], "resistances": []}
     
     # استخدام بيانات اليوم السابق
-    prev_high = float(df['high'].iloc[-2])
-    prev_low = float(df['low'].iloc[-2])
-    prev_close = float(df['close'].iloc[-2])
+    prev_high = df['high'].astype(float).iloc[-2]
+    prev_low = df['low'].astype(float).iloc[-2]
+    prev_close = df['close'].astype(float).iloc[-2]
     
     # حساب النقطة المحورية
     pivot = (prev_high + prev_low + prev_close) / 3
@@ -1658,14 +1623,14 @@ def detect_supply_demand_zones(df):
     # تحليل مناطق التجميع والتوزيع
     for i in range(50, len(df)-10):
         # منطقة طلب (Demand Zone) - ارتداد صاعد مع حجم عالي
-        if (float(closes.iloc[i]) > float(closes.iloc[i-1]) and
-            float(volumes.iloc[i]) > float(volumes.iloc[i-20:i].mean()) * SUPPLY_DEMAND_ZONE_STRENGTH and
-            float(closes.iloc[i+1]) > float(closes.iloc[i]) and
-            float(closes.iloc[i+2]) > float(closes.iloc[i+1])):
+        if (closes.iloc[i] > closes.iloc[i-1] and
+            volumes.iloc[i] > volumes.iloc[i-20:i].mean() * SUPPLY_DEMAND_ZONE_STRENGTH and
+            closes.iloc[i+1] > closes.iloc[i] and
+            closes.iloc[i+2] > closes.iloc[i+1]):
             
-            zone_high = float(highs.iloc[i])
-            zone_low = float(lows.iloc[i])
-            zone_strength = min(10.0, float(volumes.iloc[i]) / float(volumes.iloc[i-20:i].mean()) * 2)
+            zone_high = highs.iloc[i]
+            zone_low = lows.iloc[i]
+            zone_strength = min(10.0, volumes.iloc[i] / volumes.iloc[i-20:i].mean() * 2)
             
             demand_zones.append({
                 "price_range": (float(zone_low), float(zone_high)),
@@ -1675,14 +1640,14 @@ def detect_supply_demand_zones(df):
             })
         
         # منطقة عرض (Supply Zone) - ارتداد هابط مع حجم عالي
-        if (float(closes.iloc[i]) < float(closes.iloc[i-1]) and
-            float(volumes.iloc[i]) > float(volumes.iloc[i-20:i].mean()) * SUPPLY_DEMAND_ZONE_STRENGTH and
-            float(closes.iloc[i+1]) < float(closes.iloc[i]) and
-            float(closes.iloc[i+2]) < float(closes.iloc[i+1])):
+        if (closes.iloc[i] < closes.iloc[i-1] and
+            volumes.iloc[i] > volumes.iloc[i-20:i].mean() * SUPPLY_DEMAND_ZONE_STRENGTH and
+            closes.iloc[i+1] < closes.iloc[i] and
+            closes.iloc[i+2] < closes.iloc[i+1]):
             
-            zone_high = float(highs.iloc[i])
-            zone_low = float(lows.iloc[i])
-            zone_strength = min(10.0, float(volumes.iloc[i]) / float(volumes.iloc[i-20:i].mean()) * 2)
+            zone_high = highs.iloc[i]
+            zone_low = lows.iloc[i]
+            zone_strength = min(10.0, volumes.iloc[i] / volumes.iloc[i-20:i].mean() * 2)
             
             supply_zones.append({
                 "price_range": (float(zone_low), float(zone_high)),
@@ -1732,10 +1697,10 @@ def analyze_advanced_candles(df):
     for i in range(max(5, len(df)-5), len(df)):
         # 1. شموع الانعكاس القوية
         # Hammer / Inverted Hammer
-        body = abs(float(closes.iloc[i]) - float(opens.iloc[i]))
-        total_range = float(highs.iloc[i]) - float(lows.iloc[i])
-        lower_wick = min(float(closes.iloc[i]), float(opens.iloc[i])) - float(lows.iloc[i])
-        upper_wick = float(highs.iloc[i]) - max(float(closes.iloc[i]), float(opens.iloc[i]))
+        body = abs(closes.iloc[i] - opens.iloc[i])
+        total_range = highs.iloc[i] - lows.iloc[i]
+        lower_wick = min(closes.iloc[i], opens.iloc[i]) - lows.iloc[i]
+        upper_wick = highs.iloc[i] - max(closes.iloc[i], opens.iloc[i])
         
         if total_range > 0:
             body_ratio = body / total_range
@@ -1748,7 +1713,7 @@ def analyze_advanced_candles(df):
                     "name": "Hammer",
                     "type": "bullish_reversal",
                     "idx": i,
-                    "confidence": min(1.0, float(volumes.iloc[i]) / float(volumes.iloc[i-5:i].mean())),
+                    "confidence": min(1.0, volumes.iloc[i] / volumes.iloc[i-5:i].mean()),
                     "price": float(closes.iloc[i])
                 })
             
@@ -1758,37 +1723,37 @@ def analyze_advanced_candles(df):
                     "name": "Inverted_Hammer",
                     "type": "bullish_reversal",
                     "idx": i,
-                    "confidence": min(1.0, float(volumes.iloc[i]) / float(volumes.iloc[i-5:i].mean())),
+                    "confidence": min(1.0, volumes.iloc[i] / volumes.iloc[i-5:i].mean()),
                     "price": float(closes.iloc[i])
                 })
             
             # Shooting Star (انعكاس هابط)
-            if body_ratio < 0.3 and upper_wick_ratio > 0.6 and float(closes.iloc[i]) < float(opens.iloc[i]):
+            if body_ratio < 0.3 and upper_wick_ratio > 0.6 and closes.iloc[i] < opens.iloc[i]:
                 patterns.append({
                     "name": "Shooting_Star",
                     "type": "bearish_reversal",
                     "idx": i,
-                    "confidence": min(1.0, float(volumes.iloc[i]) / float(volumes.iloc[i-5:i].mean())),
+                    "confidence": min(1.0, volumes.iloc[i] / volumes.iloc[i-5:i].mean()),
                     "price": float(closes.iloc[i])
                 })
             
             # Hanging Man (انعكاس هابط)
-            if body_ratio < 0.3 and lower_wick_ratio > 0.6 and float(closes.iloc[i]) < float(opens.iloc[i]):
+            if body_ratio < 0.3 and lower_wick_ratio > 0.6 and closes.iloc[i] < opens.iloc[i]:
                 patterns.append({
                     "name": "Hanging_Man",
                     "type": "bearish_reversal",
                     "idx": i,
-                    "confidence": min(1.0, float(volumes.iloc[i]) / float(volumes.iloc[i-5:i].mean())),
+                    "confidence": min(1.0, volumes.iloc[i] / volumes.iloc[i-5:i].mean()),
                     "price": float(closes.iloc[i])
                 })
         
         # 2. أنماط الشموع المتعددة
         if i >= 2:
             # Evening Star (3 شمعات)
-            if (float(closes.iloc[i-2]) > float(opens.iloc[i-2]) and  # شمعة صاعدة
+            if (closes.iloc[i-2] > opens.iloc[i-2] and  # شمعة صاعدة
                 body_ratio < 0.3 and  # شمعة صغيرة في المنتصف
-                float(closes.iloc[i]) < float(opens.iloc[i]) and  # شمعة هابطة
-                float(closes.iloc[i]) < float(closes.iloc[i-2]) * 0.5 + float(opens.iloc[i-2]) * 0.5):
+                closes.iloc[i] < opens.iloc[i] and  # شمعة هابطة
+                closes.iloc[i] < closes.iloc[i-2] * 0.5 + opens.iloc[i-2] * 0.5):
                 
                 patterns.append({
                     "name": "Evening_Star",
@@ -1799,10 +1764,10 @@ def analyze_advanced_candles(df):
                 })
             
             # Morning Star (3 شمعات)
-            if (float(closes.iloc[i-2]) < float(opens.iloc[i-2]) and  # شمعة هابطة
+            if (closes.iloc[i-2] < opens.iloc[i-2] and  # شمعة هابطة
                 body_ratio < 0.3 and  # شمعة صغيرة في المنتصف
-                float(closes.iloc[i]) > float(opens.iloc[i]) and  # شمعة صاعدة
-                float(closes.iloc[i]) > float(closes.iloc[i-2]) * 0.5 + float(opens.iloc[i-2]) * 0.5):
+                closes.iloc[i] > opens.iloc[i] and  # شمعة صاعدة
+                closes.iloc[i] > closes.iloc[i-2] * 0.5 + opens.iloc[i-2] * 0.5):
                 
                 patterns.append({
                     "name": "Morning_Star",
@@ -1815,7 +1780,7 @@ def analyze_advanced_candles(df):
     # 3. اكتشاف انعكاسات الزخم باستخدام RSI والشمعة
     if len(df) >= 14:
         rsi = compute_rsi(closes, 14)
-        current_rsi = float(rsi.iloc[-1])
+        current_rsi = rsi.iloc[-1]
         
         # انعكاس مع تأكيد RSI
         if patterns and patterns[-1]['type'] == 'bullish_reversal' and current_rsi < 30:
@@ -1862,9 +1827,9 @@ def detect_price_correction(df):
     
     # تصحيح في ترند صاعد
     if recent_high_idx > recent_low_idx:
-        swing_high = float(highs.iloc[recent_high_idx])
-        swing_low = float(lows.iloc[recent_low_idx])
-        current_price = float(closes.iloc[-1])
+        swing_high = highs.iloc[recent_high_idx]
+        swing_low = lows.iloc[recent_low_idx]
+        current_price = closes.iloc[-1]
         
         # حساب مستويات فيبوناتشي للترند الصاعد
         fib_levels = {
@@ -1895,9 +1860,9 @@ def detect_price_correction(df):
     
     # تصحيح في ترند هابط
     elif recent_low_idx > recent_high_idx:
-        swing_high = float(highs.iloc[recent_high_idx])
-        swing_low = float(lows.iloc[recent_low_idx])
-        current_price = float(closes.iloc[-1])
+        swing_high = highs.iloc[recent_high_idx]
+        swing_low = lows.iloc[recent_low_idx]
+        current_price = closes.iloc[-1]
         
         # حساب مستويات فيبوناتشي للترند الهابط
         fib_levels = {
@@ -1949,7 +1914,7 @@ def detect_market_reversal(df, ind):
     
     # تباعد هابط (Bearish Divergence)
     if (len(df) >= 20 and
-        float(closes.iloc[-1]) > float(closes.iloc[-10]) and  # سعر أعلى
+        closes.iloc[-1] > closes.iloc[-10] and  # سعر أعلى
         rsi < safe_get(ind, 'rsi_prev', rsi) and  # RSI أقل
         current_macd_hist < prev_macd_hist):     # MACD هابط
         divergence_signals.append({
@@ -1960,7 +1925,7 @@ def detect_market_reversal(df, ind):
     
     # تباعد صاعد (Bullish Divergence)
     if (len(df) >= 20 and
-        float(closes.iloc[-1]) < float(closes.iloc[-10]) and  # سعر أقل
+        closes.iloc[-1] < closes.iloc[-10] and  # سعر أقل
         rsi > safe_get(ind, 'rsi_prev', rsi) and  # RSI أعلى
         current_macd_hist > prev_macd_hist):     # MACD صاعد
         divergence_signals.append({
@@ -1970,7 +1935,7 @@ def detect_market_reversal(df, ind):
         })
     
     # تأكيدات الحجم
-    volume_confirmation = float(volumes.iloc[-1]) > float(volumes.tail(20).mean()) * 1.5
+    volume_confirmation = volumes.iloc[-1] > volumes.tail(20).mean() * 1.5
     
     # قرار الانعكاس
     reversal_confidence = 0
@@ -2365,8 +2330,8 @@ def super_council_ai_enhanced(df):
 
         # 1. تحليل الزخم المبكر
         if TREND_EARLY_DETECTION:
-            momentum_accel = momentum.get('price_accel', 0.0)
-            momentum_roc = momentum.get('roc', 0.0)
+            momentum_accel = safe_get(momentum, 'price_accel', 0.0)
+            momentum_roc = safe_get(momentum, 'roc', 0.0)
             
             if momentum_accel > 0 and momentum_roc > 0.5:
                 score_b += WEIGHT_MOMENTUM * 1.5
@@ -2385,7 +2350,6 @@ def super_council_ai_enhanced(df):
             volume_spike = volume_profile.get('volume_spike', False)
             volume_trend = volume_profile.get('volume_trend', '')
             
-            # volume_spike هو boolean بالفعل، volume_trend هو string
             if volume_spike and volume_trend == 'up':
                 if current_price > float(df['open'].iloc[-1]):
                     score_b += WEIGHT_VOLUME * 1.2
@@ -2578,29 +2542,10 @@ def super_council_ai_enhanced(df):
         }
     except Exception as e:
         log_w(f"super_council_ai_enhanced error: {e}")
-        import traceback
-        log_w(f"Traceback: {traceback.format_exc()}")
         return {"b":0,"s":0,"score_b":0.0,"score_s":0.0,"logs":[],"ind":{},"confidence":0.0}
 
-def council_votes_pro(df):
-    """واجهة متوافقة مع الإصدار المحسن"""
-    try:
-        return enhanced_super_council_with_smc(df)
-    except Exception as e:
-        log_w(f"council_votes_pro error: {e}")
-        # Fallback to basic calculation
-        ind = compute_indicators(df)
-        adx = safe_get(ind, 'adx', 0)
-        plus_di = safe_get(ind, 'plus_di', 0)
-        minus_di = safe_get(ind, 'minus_di', 0)
-        di_spread = abs(plus_di - minus_di)
-        
-        if adx > 20 and plus_di > minus_di:
-            return {"b": 3, "s": 1, "score_b": 5.0, "score_s": 2.0, "ind": ind, "confidence": 0.6}
-        elif adx > 20 and minus_di > plus_di:
-            return {"b": 1, "s": 3, "score_b": 2.0, "score_s": 5.0, "ind": ind, "confidence": 0.6}
-        else:
-            return {"b": 0, "s": 0, "score_b": 0.0, "score_s": 0.0, "ind": ind, "confidence": 0.0}
+council_votes_pro_enhanced = enhanced_super_council_with_smc
+council_votes_pro = enhanced_super_council_with_smc
 
 # =================== SUPER SCALP AI - ENHANCED VERSION ===================
 _last_scalp_ts = 0
@@ -2615,13 +2560,7 @@ def detect_super_scalp_opportunity(df, ind, flow, volume_profile, momentum, spre
             return (None, f"spread>{MAX_SPREAD_BPS}bps")
 
         current_price = float(df['close'].iloc[-1])
-        
-        # معالجة volume_profile لاستخراج قيمة مفردة
-        volume_spike = volume_profile.get('volume_spike', False)
-        volume_trend = volume_profile.get('volume_trend', '')
-        
-        volume_ok = volume_spike and volume_trend == 'up'
-        
+        volume_ok = volume_profile['volume_spike'] and volume_profile['volume_trend'] == 'up'
         momentum_ok = abs(momentum['roc']) > 0.3
         volatility_ok = momentum['volatility'] > momentum['volatility_ma'] * 0.8
         
@@ -2907,9 +2846,9 @@ def open_market_enhanced(side, qty, price):
     
     votes = snap["cv"]
     mode_data = decide_strategy_mode(df, 
-                                   adx=safe_get(votes.get("ind", {}), "adx", 0),
-                                   di_plus=safe_get(votes.get("ind", {}), "plus_di", 0),
-                                   di_minus=safe_get(votes.get("ind", {}), "minus_di", 0),
+                                   adx=safe_get(votes["ind"], "adx", 0),
+                                   di_plus=safe_get(votes["ind"], "plus_di", 0),
+                                   di_minus=safe_get(votes["ind"], "minus_di", 0),
                                    rsi_ctx=rsi_ma_context(df))
     
     mode = mode_data["mode"]
@@ -2953,7 +2892,7 @@ def open_market_enhanced(side, qty, price):
             "trail_tightened": False,
         })
         
-        STATE["last_ind"] = votes.get("ind", {}) if isinstance(votes,dict) else {}
+        STATE["last_ind"] = votes["ind"] if isinstance(votes,dict) else {}
         STATE["last_council"] = votes
         STATE["last_flow"] = compute_flow_metrics(df)
         STATE["last_spread_bps"] = orderbook_spread_bps()
@@ -3646,8 +3585,8 @@ def detect_emergency_exit_signals(df, current_price, side, analysis):
     
     # 4. حجم تداول منخفض بشكل خطير
     volumes = df['volume'].astype(float)
-    current_volume = float(volumes.iloc[-1])
-    avg_volume = float(volumes.tail(20).mean())
+    current_volume = volumes.iloc[-1]
+    avg_volume = volumes.tail(20).mean()
     
     if current_volume < avg_volume * 0.3:  # أقل من 30% من المتوسط
         emergency_signals.update({
@@ -3774,8 +3713,8 @@ def secure_entry_validation(df, signal_type, current_price, analysis):
         
         # 6. تحليل الحجم
         volumes = df['volume'].astype(float)
-        current_volume = float(volumes.iloc[-1])
-        avg_volume = float(volumes.tail(20).mean())
+        current_volume = volumes.iloc[-1]
+        avg_volume = volumes.tail(20).mean()
         
         if current_volume > avg_volume * 1.5:
             validation["confidence"] += 0.1
@@ -3920,7 +3859,7 @@ def trade_loop_enhanced():
                 momentum = compute_momentum_indicators(df)
                 
                 STATE["last_ind"] = ind
-                STATE["last_council"] = council_votes_pro(df)
+                STATE["last_council"] = council_votes_pro_enhanced(df)
                 STATE["last_flow"] = flow_ctx
                 STATE["last_spread_bps"] = spread_bps
                 
@@ -3931,7 +3870,7 @@ def trade_loop_enhanced():
             if spread_bps is not None and spread_bps > MAX_SPREAD_BPS:
                 reason = f"spread too high ({fmt(spread_bps,2)}bps > {MAX_SPREAD_BPS})"
             
-            council_data = council_votes_pro(df)
+            council_data = council_votes_pro_enhanced(df)
             gz = council_data.get("gz")
             sig = None
 
