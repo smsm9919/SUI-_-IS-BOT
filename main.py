@@ -116,6 +116,20 @@ def log_w(msg): print(f"🟨 {msg}", flush=True)
 def log_e(msg): print(f"❌ {msg}", flush=True)
 def log_banner(text): print(f"\n{'—'*12} {text} {'—'*12}\n", flush=True)
 
+# =================== SETUP LOGGING ===================
+def setup_file_logging():
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    
+    if not any(isinstance(h, RotatingFileHandler) and getattr(h, "baseFilename", "").endswith("smart_money_bot.log")
+               for h in logger.handlers):
+        fh = RotatingFileHandler("smart_money_bot.log", maxBytes=10_000_000, backupCount=10, encoding="utf-8")
+        fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
+        logger.addHandler(fh)
+    
+    logging.getLogger('werkzeug').setLevel(logging.ERROR)
+
+# =================== STATE MANAGEMENT ===================
 def save_state(state: dict):
     try:
         state["ts"] = int(time.time())
@@ -1535,22 +1549,33 @@ def home():
         else:
             position_status = f"SHORT {bot.current_position['position_size']:.4f} @ {bot.current_position['entry_price']:.6f}"
     
-    return """
+    signal_class = "hold"
+    signal_text = "HOLD"
+    
+    if bot.current_position:
+        if bot.current_position["side"] == "long":
+            signal_class = "buy"
+            signal_text = "BUY"
+        else:
+            signal_class = "sell"
+            signal_text = "SELL"
+    
+    return f"""
     <html>
         <head>
             <title>ULTIMATE SMART MONEY BOT</title>
             <style>
-                body { font-family: Arial, sans-serif; margin: 40px; }
-                .container { max-width: 1200px; margin: 0 auto; }
-                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                         color: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
-                .card { background: white; border: 1px solid #ddd; border-radius: 8px; 
-                        padding: 20px; margin: 10px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-                .signal { font-size: 24px; font-weight: bold; margin: 10px 0; }
-                .buy { color: #10b981; }
-                .sell { color: #ef4444; }
-                .hold { color: #6b7280; }
-                .metric { display: inline-block; margin: 0 20px; }
+                body {{ font-family: Arial, sans-serif; margin: 40px; }}
+                .container {{ max-width: 1200px; margin: 0 auto; }}
+                .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                         color: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }}
+                .card {{ background: white; border: 1px solid #ddd; border-radius: 8px; 
+                        padding: 20px; margin: 10px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
+                .signal {{ font-size: 24px; font-weight: bold; margin: 10px 0; }}
+                .buy {{ color: #10b981; }}
+                .sell {{ color: #ef4444; }}
+                .hold {{ color: #6b7280; }}
+                .metric {{ display: inline-block; margin: 0 20px; }}
             </style>
         </head>
         <body>
@@ -1562,41 +1587,29 @@ def home():
                 
                 <div class="card">
                     <h2>📈 Live Analysis</h2>
-                    <div class="metric"><strong>Symbol:</strong> %s</div>
-                    <div class="metric"><strong>Interval:</strong> %s</div>
-                    <div class="metric"><strong>Exchange:</strong> %s</div>
-                    <div class="metric"><strong>Mode:</strong> %s</div>
+                    <div class="metric"><strong>Symbol:</strong> {SYMBOL}</div>
+                    <div class="metric"><strong>Interval:</strong> {INTERVAL}</div>
+                    <div class="metric"><strong>Exchange:</strong> {EXCHANGE_NAME.upper()}</div>
+                    <div class="metric"><strong>Mode:</strong> {"LIVE" if MODE_LIVE else "PAPER"}</div>
                 </div>
                 
                 <div class="card">
                     <h2>🚦 Trading Status</h2>
-                    <div class="signal %s">Signal: %s</div>
-                    <p><strong>Position:</strong> %s</p>
-                    <p><strong>Consecutive Losses:</strong> %s</p>
+                    <div class="signal {signal_class}">Signal: {signal_text}</div>
+                    <p><strong>Position:</strong> {position_status}</p>
+                    <p><strong>Consecutive Losses:</strong> {bot.consecutive_losses}</p>
                 </div>
                 
                 <div class="card">
                     <h2>⚙️ System Health</h2>
                     <p><strong>Uptime:</strong> Running</p>
-                    <p><strong>Last Update:</strong> %s</p>
+                    <p><strong>Last Update:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
                     <p><strong>API Status:</strong> Connected</p>
                 </div>
             </div>
         </body>
     </html>
-    """ % (
-        SYMBOL,
-        INTERVAL,
-        EXCHANGE_NAME.upper(),
-        "LIVE" if MODE_LIVE else "PAPER",
-        "buy" if bot.current_position and bot.current_position["side"] == "long" else 
-               "sell" if bot.current_position and bot.current_position["side"] == "short" else "hold",
-        "BUY" if bot.current_position and bot.current_position["side"] == "long" else 
-               "SELL" if bot.current_position and bot.current_position["side"] == "short" else "HOLD",
-        position_status,
-        bot.consecutive_losses,
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    )
+    """
 
 @app.route("/api/status")
 def api_status():
@@ -1638,19 +1651,6 @@ def api_analyze():
         "timestamp": datetime.now().isoformat()
     })
 
-# =================== SETUP LOGGING ===================
-def setup_file_logging():
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    
-    if not any(isinstance(h, RotatingFileHandler) and getattr(h, "baseFilename", "").endswith("smart_money_bot.log")
-               for h in logger.handlers):
-        fh = RotatingFileHandler("smart_money_bot.log", maxBytes=10_000_000, backupCount=10, encoding="utf-8")
-        fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
-        logger.addHandler(fh)
-    
-    logging.getLogger('werkzeug').setLevel(logging.ERROR)
-
 # =================== MAIN EXECUTION ===================
 def main():
     """الدالة الرئيسية لتشغيل البوت"""
@@ -1669,8 +1669,6 @@ def main():
     print("   • Intelligent Risk Management")
     print("   • Dynamic Position Sizing")
     print("   • Multi-Timeframe Confluence")
-    
-    setup_file_logging()
     
     # بدء البوت في خيط منفصل
     import threading
