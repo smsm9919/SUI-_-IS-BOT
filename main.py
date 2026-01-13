@@ -89,8 +89,8 @@ ENTRY_RETEST_CONFIRMATION = True
 # ==== Advanced Risk Management ====
 DYNAMIC_POSITION_SIZING = True
 VOLATILITY_ADJUSTED_SL = True
-TRAILING_STOP_ACTIVATION = 0.5  %  # Activate after 0.5% profit
-TRAILING_STOP_DISTANCE = 1.0  %  # Distance from price
+TRAILING_STOP_ACTIVATION = 0.5  # Activate after 0.5% profit
+TRAILING_STOP_DISTANCE = 1.0  # Distance from price
 MAX_CONSECUTIVE_LOSSES = 3
 COOLDOWN_AFTER_LOSS = 300  # 5 minutes
 
@@ -947,9 +947,9 @@ class AdvancedRiskManager:
     
     def __init__(self):
         self.initial_sl_pct = 1.5  # وقف الخسارة الأولي 1.5%
-        self.trailing_activation_pct = 0.5  %  # تفعيل التريل بعد 0.5% ربح
-        self.trailing_distance_pct = 1.0  %  # مسافة التريل 1%
-        self.max_position_pct = 2.0  %  # الحد الأقصى للمركز 2% من الرصيد
+        self.trailing_activation_pct = 0.5  # تفعيل التريل بعد 0.5% ربح
+        self.trailing_distance_pct = 1.0  # مسافة التريل 1%
+        self.max_position_pct = 2.0  # الحد الأقصى للمركز 2% من الرصيد
         self.consecutive_losses = 0
         self.last_trade_time = 0
         self.cooldown_period = 300  # 5 دقائق تبريد بعد خسارة
@@ -1097,7 +1097,7 @@ def intelligent_entry_system(df: pd.DataFrame, current_price: float) -> Dict:
     # 4. مستويات فيبوناتشي
     nearest_fib = fib.get("nearest_fib_level", 0)
     fib_distance_pct = abs(current_price - nearest_fib) / current_price * 100
-    if fib_distance_pct < 0.5:  %  # ضمن 0.5%
+    if fib_distance_pct < 0.5:  # ضمن 0.5%
         signal_strength += 1.0
         reasons.append(f"At Fibonacci level ({fib_distance_pct:.1f}% distance)")
     
@@ -1207,7 +1207,7 @@ def manage_open_trade(df: pd.DataFrame, entry_data: Dict,
                 reversal_type = pattern["name"]
                 break
         
-        if reversal_type and pnl_pct > 0.5:  %  # إذا كان لدينا ربح وتشكل انعكاس
+        if reversal_type and pnl_pct > 0.5:  # إذا كان لدينا ربح وتشكل انعكاس
             management_signal["action"] = "close"
             management_signal["reason"] = f"Reversal pattern detected: {reversal_type}"
     
@@ -1528,6 +1528,13 @@ bot = UltimateSmartMoneyBot()
 
 @app.route("/")
 def home():
+    position_status = "No Position"
+    if bot.current_position:
+        if bot.current_position["side"] == "long":
+            position_status = f"LONG {bot.current_position['position_size']:.4f} @ {bot.current_position['entry_price']:.6f}"
+        else:
+            position_status = f"SHORT {bot.current_position['position_size']:.4f} @ {bot.current_position['entry_price']:.6f}"
+    
     return """
     <html>
         <head>
@@ -1555,29 +1562,29 @@ def home():
                 
                 <div class="card">
                     <h2>📈 Live Analysis</h2>
-                    <div class="metric"><strong>Symbol:</strong> {}</div>
-                    <div class="metric"><strong>Interval:</strong> {}</div>
-                    <div class="metric"><strong>Exchange:</strong> {}</div>
-                    <div class="metric"><strong>Mode:</strong> {}</div>
+                    <div class="metric"><strong>Symbol:</strong> %s</div>
+                    <div class="metric"><strong>Interval:</strong> %s</div>
+                    <div class="metric"><strong>Exchange:</strong> %s</div>
+                    <div class="metric"><strong>Mode:</strong> %s</div>
                 </div>
                 
                 <div class="card">
                     <h2>🚦 Trading Status</h2>
-                    <div class="signal {}">Signal: {}</div>
-                    <p><strong>Position:</strong> {}</p>
-                    <p><strong>Consecutive Losses:</strong> {}</p>
+                    <div class="signal %s">Signal: %s</div>
+                    <p><strong>Position:</strong> %s</p>
+                    <p><strong>Consecutive Losses:</strong> %s</p>
                 </div>
                 
                 <div class="card">
                     <h2>⚙️ System Health</h2>
                     <p><strong>Uptime:</strong> Running</p>
-                    <p><strong>Last Update:</strong> {}</p>
+                    <p><strong>Last Update:</strong> %s</p>
                     <p><strong>API Status:</strong> Connected</p>
                 </div>
             </div>
         </body>
     </html>
-    """.format(
+    """ % (
         SYMBOL,
         INTERVAL,
         EXCHANGE_NAME.upper(),
@@ -1586,7 +1593,7 @@ def home():
                "sell" if bot.current_position and bot.current_position["side"] == "short" else "hold",
         "BUY" if bot.current_position and bot.current_position["side"] == "long" else 
                "SELL" if bot.current_position and bot.current_position["side"] == "short" else "HOLD",
-        "Active" if bot.current_position else "No Position",
+        position_status,
         bot.consecutive_losses,
         datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     )
