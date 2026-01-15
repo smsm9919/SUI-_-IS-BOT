@@ -16,7 +16,7 @@ import numpy as np
 import ccxt
 from flask import Flask, jsonify
 from decimal import Decimal, ROUND_DOWN, InvalidOperation
-import talib
+import ta  # استخدام مكتبة ta بدلاً من TA-Lib
 from scipy import stats
 
 try:
@@ -167,7 +167,7 @@ class AdvancedMarketAnalyzer:
             high = df['high'].astype(float)
             low = df['low'].astype(float)
             
-            # حساب المتوسطات المتحركة
+            # حساب المتوسطات المتحركة باستخدام pandas
             sma_20 = close.rolling(20).mean()
             sma_50 = close.rolling(50).mean()
             sma_200 = close.rolling(200).mean()
@@ -266,9 +266,14 @@ class SniperGates:
         
         # Gate 3: ADX Filter (No Chop)
         if USE_ADX_FILTER and len(df) >= 14:
-            adx = talib.ADX(df['high'], df['low'], df['close'], timeperiod=14)
-            if adx.iloc[-1] < MIN_ADX:
-                return False, f"ADX too low: {adx.iloc[-1]:.1f}"
+            try:
+                # حساب ADX باستخدام مكتبة ta
+                adx_indicator = ta.trend.ADXIndicator(df['high'], df['low'], df['close'], window=14)
+                adx = adx_indicator.adx()
+                if adx.iloc[-1] < MIN_ADX:
+                    return False, f"ADX too low: {adx.iloc[-1]:.1f}"
+            except Exception as e:
+                log_w(f"ADX calculation error: {e}")
         
         # Gate 4: Consecutive Losses Protection
         if consecutive_losses >= 3:
@@ -472,7 +477,9 @@ class TrendRegimeFilter:
         high = df['high'].rolling(period).max()
         low = df['low'].rolling(period).min()
         
-        atr = talib.ATR(df['high'], df['low'], df['close'], timeperiod=period)
+        # حساب ATR باستخدام ta
+        atr_indicator = ta.volatility.AverageTrueRange(df['high'], df['low'], df['close'], window=period)
+        atr = atr_indicator.average_true_range()
         
         long_stop = high - atr * multiplier
         short_stop = low + atr * multiplier
@@ -492,14 +499,11 @@ class TrendRegimeFilter:
         if len(df) < 14:
             return 0
             
-        # استخدام ADX و DI
-        adx = talib.ADX(df['high'], df['low'], df['close'], timeperiod=14)
-        plus_di = talib.PLUS_DI(df['high'], df['low'], df['close'], timeperiod=14)
-        minus_di = talib.MINUS_DI(df['high'], df['low'], df['close'], timeperiod=14)
-        
-        current_adx = adx.iloc[-1]
-        current_plus_di = plus_di.iloc[-1]
-        current_minus_di = minus_di.iloc[-1]
+        # استخدام ADX و DI من مكتبة ta
+        adx_indicator = ta.trend.ADXIndicator(df['high'], df['low'], df['close'], window=14)
+        current_adx = adx_indicator.adx().iloc[-1]
+        current_plus_di = adx_indicator.adx_pos().iloc[-1]
+        current_minus_di = adx_indicator.adx_neg().iloc[-1]
         
         if current_adx < MIN_ADX:
             return 0  # لا ترند واضح
@@ -537,7 +541,9 @@ class SniperRiskEngine:
         if len(df) < 14:
             return None
             
-        atr = talib.ATR(df['high'], df['low'], df['close'], timeperiod=14).iloc[-1]
+        # حساب ATR باستخدام ta
+        atr_indicator = ta.volatility.AverageTrueRange(df['high'], df['low'], df['close'], window=14)
+        atr = atr_indicator.average_true_range().iloc[-1]
         
         if side == "buy":
             # SL خلف آخر Sweep سفلي
@@ -642,9 +648,13 @@ class DefenseSystem:
         
         # 2. ضعف ADX/DI
         if len(df) >= 14:
-            adx = talib.ADX(df['high'], df['low'], df['close'], timeperiod=14).iloc[-1]
-            if adx < MIN_ADX:
-                signals.append("weak_adx")
+            try:
+                adx_indicator = ta.trend.ADXIndicator(df['high'], df['low'], df['close'], window=14)
+                adx = adx_indicator.adx().iloc[-1]
+                if adx < MIN_ADX:
+                    signals.append("weak_adx")
+            except Exception:
+                pass
         
         return signals
 
@@ -1051,60 +1061,6 @@ def orderbook_spread_bps():
     except Exception:
         return None
 
-def compute_advanced_indicators(df):
-    """حساب المؤشرات المتقدمة"""
-    try:
-        close = df['close'].astype(float)
-        high = df['high'].astype(float)
-        low = df['low'].astype(float)
-        volume = df['volume'].astype(float)
-        
-        # مؤشرات الترند
-        sma_20 = talib.SMA(close, timeperiod=20)
-        sma_50 = talib.SMA(close, timeperiod=50)
-        ema_20 = talib.EMA(close, timeperiod=20)
-        
-        # مؤشرات الزخم
-        rsi = talib.RSI(close, timeperiod=14)
-        macd, macd_signal, macd_hist = talib.MACD(close)
-        stoch_k, stoch_d = talib.STOCH(high, low, close)
-        
-        # مؤشرات التقلب
-        atr = talib.ATR(high, low, close, timeperiod=14)
-        bollinger_upper, bollinger_middle, bollinger_lower = talib.BBANDS(close, timeperiod=20)
-        
-        # مؤشرات الحجم
-        obv = talib.OBV(close, volume)
-        
-        # مؤشرات الاتجاه
-        adx = talib.ADX(high, low, close, timeperiod=14)
-        plus_di = talib.PLUS_DI(high, low, close, timeperiod=14)
-        minus_di = talib.MINUS_DI(high, low, close, timeperiod=14)
-        
-        return {
-            'sma_20': last_scalar(sma_20),
-            'sma_50': last_scalar(sma_50),
-            'ema_20': last_scalar(ema_20),
-            'rsi': last_scalar(rsi),
-            'macd': last_scalar(macd),
-            'macd_signal': last_scalar(macd_signal),
-            'macd_hist': last_scalar(macd_hist),
-            'stoch_k': last_scalar(stoch_k),
-            'stoch_d': last_scalar(stoch_d),
-            'atr': last_scalar(atr),
-            'bollinger_upper': last_scalar(bollinger_upper),
-            'bollinger_middle': last_scalar(bollinger_middle),
-            'bollinger_lower': last_scalar(bollinger_lower),
-            'obv': last_scalar(obv),
-            'adx': last_scalar(adx),
-            'plus_di': last_scalar(plus_di),
-            'minus_di': last_scalar(minus_di),
-            'volume': last_scalar(volume)
-        }
-    except Exception as e:
-        log_w(f"Advanced indicators error: {e}")
-        return {}
-
 # =================== ULTRA INTELLIGENT COUNCIL AI ===================
 def ultra_intelligent_council_ai(df):
     """مجلس الإدارة الذكي الفائق - يدمج SMC مع المؤشرات المتقدمة"""
@@ -1117,8 +1073,74 @@ def ultra_intelligent_council_ai(df):
         support_resistance = market_analyzer.calculate_support_resistance(df)
         volatility_regime, volatility_ratio = market_analyzer.analyze_volatility_regime(df)
         
-        # المؤشرات المتقدمة
-        advanced_indicators = compute_advanced_indicators(df)
+        # المؤشرات المتقدمة باستخدام ta
+        close = df['close'].astype(float)
+        high = df['high'].astype(float)
+        low = df['low'].astype(float)
+        volume = df['volume'].astype(float)
+        
+        # حساب المؤشرات باستخدام ta
+        # RSI
+        rsi_indicator = ta.momentum.RSIIndicator(close, window=14)
+        rsi = rsi_indicator.rsi().iloc[-1]
+        
+        # MACD
+        macd_indicator = ta.trend.MACD(close)
+        macd = macd_indicator.macd().iloc[-1]
+        macd_signal = macd_indicator.macd_signal().iloc[-1]
+        macd_hist = macd_indicator.macd_diff().iloc[-1]
+        
+        # ATR
+        atr_indicator = ta.volatility.AverageTrueRange(high, low, close, window=14)
+        atr = atr_indicator.average_true_range().iloc[-1]
+        
+        # ADX و DI
+        adx_indicator = ta.trend.ADXIndicator(high, low, close, window=14)
+        adx = adx_indicator.adx().iloc[-1]
+        plus_di = adx_indicator.adx_pos().iloc[-1]
+        minus_di = adx_indicator.adx_neg().iloc[-1]
+        
+        # بولينجر باند
+        bb_indicator = ta.volatility.BollingerBands(close, window=20, window_dev=2)
+        bb_upper = bb_indicator.bollinger_hband().iloc[-1]
+        bb_middle = bb_indicator.bollinger_mband().iloc[-1]
+        bb_lower = bb_indicator.bollinger_lband().iloc[-1]
+        
+        # Stochastic
+        stoch_indicator = ta.momentum.StochasticOscillator(high, low, close, window=14, smooth_window=3)
+        stoch_k = stoch_indicator.stoch().iloc[-1]
+        stoch_d = stoch_indicator.stoch_signal().iloc[-1]
+        
+        # OBV
+        obv_indicator = ta.volume.OnBalanceVolumeIndicator(close, volume)
+        obv = obv_indicator.on_balance_volume().iloc[-1]
+        
+        # المتوسطات المتحركة
+        sma_20 = close.rolling(20).mean().iloc[-1]
+        sma_50 = close.rolling(50).mean().iloc[-1]
+        ema_20 = close.ewm(span=20, adjust=False).mean().iloc[-1]
+        
+        advanced_indicators = {
+            'sma_20': sma_20,
+            'sma_50': sma_50,
+            'ema_20': ema_20,
+            'rsi': rsi,
+            'macd': macd,
+            'macd_signal': macd_signal,
+            'macd_hist': macd_hist,
+            'stoch_k': stoch_k,
+            'stoch_d': stoch_d,
+            'atr': atr,
+            'bollinger_upper': bb_upper,
+            'bollinger_middle': bb_middle,
+            'bollinger_lower': bb_lower,
+            'obv': obv,
+            'adx': adx,
+            'plus_di': plus_di,
+            'minus_di': minus_di,
+            'volume': volume.iloc[-1],
+            'di_spread': abs(plus_di - minus_di)
+        }
         
         # تحليل SMC
         smc = SMCContextAnalyzer()
@@ -1211,16 +1233,15 @@ def ultra_intelligent_council_ai(df):
         if trend_dir == 1:
             score_b += WEIGHT_ADX * 2.0
             votes_b += 2
-            logs.append(f"🎯 Strong uptrend (ADX: {advanced_indicators.get('adx', 0):.1f})")
+            logs.append(f"🎯 Strong uptrend (ADX: {adx:.1f})")
             confidence_factors.append(1.5)
         elif trend_dir == -1:
             score_s += WEIGHT_ADX * 2.0
             votes_s += 2
-            logs.append(f"🎯 Strong downtrend (ADX: {advanced_indicators.get('adx', 0):.1f})")
+            logs.append(f"🎯 Strong downtrend (ADX: {adx:.1f})")
             confidence_factors.append(1.5)
         
         # ===== 4. المؤشرات التقنية =====
-        rsi = advanced_indicators.get('rsi', 50)
         if rsi < 30:
             score_b += WEIGHT_RSI * 2.0
             votes_b += 2
@@ -1230,7 +1251,6 @@ def ultra_intelligent_council_ai(df):
             votes_s += 2
             logs.append("📊 RSI overbought")
         
-        macd_hist = advanced_indicators.get('macd_hist', 0)
         if macd_hist > 0:
             score_b += WEIGHT_MACD * 1.5
             votes_b += 1
@@ -1673,7 +1693,9 @@ def manage_hybrid_position():
     
     # 3. بدء التريل عند مستوى معين
     elif pnl_pct >= TRAIL_START_AT:
-        atr = talib.ATR(df['high'], df['low'], df['close'], timeperiod=14).iloc[-1]
+        # حساب ATR باستخدام ta
+        atr_indicator = ta.volatility.AverageTrueRange(df['high'], df['low'], df['close'], window=14)
+        atr = atr_indicator.average_true_range().iloc[-1]
         
         if STATE["side"] == "buy":
             new_trail = current_price - atr * ATR_TRAIL_MULT
@@ -1689,7 +1711,9 @@ def manage_hybrid_position():
     
     # 4. تشديد التريل عند أرباح عالية
     if pnl_pct >= TIGHTEN_TRAIL_AT and STATE.get("trail_price"):
-        atr = talib.ATR(df['high'], df['low'], df['close'], timeperiod=14).iloc[-1]
+        # حساب ATR باستخدام ta
+        atr_indicator = ta.volatility.AverageTrueRange(df['high'], df['low'], df['close'], window=14)
+        atr = atr_indicator.average_true_range().iloc[-1]
         
         if STATE["side"] == "buy":
             tighter_trail = current_price - atr * (ATR_TRAIL_MULT * 0.7)
