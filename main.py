@@ -1082,43 +1082,43 @@ def ultra_intelligent_council_ai(df):
         # حساب المؤشرات باستخدام ta
         # RSI
         rsi_indicator = ta.momentum.RSIIndicator(close, window=14)
-        rsi = rsi_indicator.rsi().iloc[-1]
+        rsi = rsi_indicator.rsi().iloc[-1] if len(rsi_indicator.rsi()) > 0 else 50
         
         # MACD
         macd_indicator = ta.trend.MACD(close)
-        macd = macd_indicator.macd().iloc[-1]
-        macd_signal = macd_indicator.macd_signal().iloc[-1]
-        macd_hist = macd_indicator.macd_diff().iloc[-1]
+        macd = macd_indicator.macd().iloc[-1] if len(macd_indicator.macd()) > 0 else 0
+        macd_signal = macd_indicator.macd_signal().iloc[-1] if len(macd_indicator.macd_signal()) > 0 else 0
+        macd_hist = macd_indicator.macd_diff().iloc[-1] if len(macd_indicator.macd_diff()) > 0 else 0
         
         # ATR
         atr_indicator = ta.volatility.AverageTrueRange(high, low, close, window=14)
-        atr = atr_indicator.average_true_range().iloc[-1]
+        atr = atr_indicator.average_true_range().iloc[-1] if len(atr_indicator.average_true_range()) > 0 else 0
         
         # ADX و DI
         adx_indicator = ta.trend.ADXIndicator(high, low, close, window=14)
-        adx = adx_indicator.adx().iloc[-1]
-        plus_di = adx_indicator.adx_pos().iloc[-1]
-        minus_di = adx_indicator.adx_neg().iloc[-1]
+        adx = adx_indicator.adx().iloc[-1] if len(adx_indicator.adx()) > 0 else 0
+        plus_di = adx_indicator.adx_pos().iloc[-1] if len(adx_indicator.adx_pos()) > 0 else 0
+        minus_di = adx_indicator.adx_neg().iloc[-1] if len(adx_indicator.adx_neg()) > 0 else 0
         
         # بولينجر باند
         bb_indicator = ta.volatility.BollingerBands(close, window=20, window_dev=2)
-        bb_upper = bb_indicator.bollinger_hband().iloc[-1]
-        bb_middle = bb_indicator.bollinger_mband().iloc[-1]
-        bb_lower = bb_indicator.bollinger_lband().iloc[-1]
+        bb_upper = bb_indicator.bollinger_hband().iloc[-1] if len(bb_indicator.bollinger_hband()) > 0 else close.iloc[-1]
+        bb_middle = bb_indicator.bollinger_mavg().iloc[-1] if len(bb_indicator.bollinger_mavg()) > 0 else close.iloc[-1]
+        bb_lower = bb_indicator.bollinger_lband().iloc[-1] if len(bb_indicator.bollinger_lband()) > 0 else close.iloc[-1]
         
         # Stochastic
         stoch_indicator = ta.momentum.StochasticOscillator(high, low, close, window=14, smooth_window=3)
-        stoch_k = stoch_indicator.stoch().iloc[-1]
-        stoch_d = stoch_indicator.stoch_signal().iloc[-1]
+        stoch_k = stoch_indicator.stoch().iloc[-1] if len(stoch_indicator.stoch()) > 0 else 50
+        stoch_d = stoch_indicator.stoch_signal().iloc[-1] if len(stoch_indicator.stoch_signal()) > 0 else 50
         
         # OBV
         obv_indicator = ta.volume.OnBalanceVolumeIndicator(close, volume)
-        obv = obv_indicator.on_balance_volume().iloc[-1]
+        obv = obv_indicator.on_balance_volume().iloc[-1] if len(obv_indicator.on_balance_volume()) > 0 else 0
         
         # المتوسطات المتحركة
-        sma_20 = close.rolling(20).mean().iloc[-1]
-        sma_50 = close.rolling(50).mean().iloc[-1]
-        ema_20 = close.ewm(span=20, adjust=False).mean().iloc[-1]
+        sma_20 = close.rolling(20).mean().iloc[-1] if len(close) >= 20 else close.iloc[-1]
+        sma_50 = close.rolling(50).mean().iloc[-1] if len(close) >= 50 else close.iloc[-1]
+        ema_20 = close.ewm(span=20, adjust=False).mean().iloc[-1] if len(close) >= 20 else close.iloc[-1]
         
         advanced_indicators = {
             'sma_20': sma_20,
@@ -1138,7 +1138,7 @@ def ultra_intelligent_council_ai(df):
             'adx': adx,
             'plus_di': plus_di,
             'minus_di': minus_di,
-            'volume': volume.iloc[-1],
+            'volume': volume.iloc[-1] if len(volume) > 0 else 0,
             'di_spread': abs(plus_di - minus_di)
         }
         
@@ -1695,37 +1695,41 @@ def manage_hybrid_position():
     elif pnl_pct >= TRAIL_START_AT:
         # حساب ATR باستخدام ta
         atr_indicator = ta.volatility.AverageTrueRange(df['high'], df['low'], df['close'], window=14)
-        atr = atr_indicator.average_true_range().iloc[-1]
+        atr_series = atr_indicator.average_true_range()
+        atr = atr_series.iloc[-1] if len(atr_series) > 0 else 0
         
-        if STATE["side"] == "buy":
-            new_trail = current_price - atr * ATR_TRAIL_MULT
-            if STATE.get("trail_price") is None or new_trail > STATE["trail_price"]:
-                STATE["trail_price"] = new_trail
-                log_sniper("TRAIL_UPDATED", f"New trail: {new_trail:.6f}")
-        
-        else:  # sell
-            new_trail = current_price + atr * ATR_TRAIL_MULT
-            if STATE.get("trail_price") is None or new_trail < STATE["trail_price"]:
-                STATE["trail_price"] = new_trail
-                log_sniper("TRAIL_UPDATED", f"New trail: {new_trail:.6f}")
+        if atr > 0:
+            if STATE["side"] == "buy":
+                new_trail = current_price - atr * ATR_TRAIL_MULT
+                if STATE.get("trail_price") is None or new_trail > STATE["trail_price"]:
+                    STATE["trail_price"] = new_trail
+                    log_sniper("TRAIL_UPDATED", f"New trail: {new_trail:.6f}")
+            
+            else:  # sell
+                new_trail = current_price + atr * ATR_TRAIL_MULT
+                if STATE.get("trail_price") is None or new_trail < STATE["trail_price"]:
+                    STATE["trail_price"] = new_trail
+                    log_sniper("TRAIL_UPDATED", f"New trail: {new_trail:.6f}")
     
     # 4. تشديد التريل عند أرباح عالية
     if pnl_pct >= TIGHTEN_TRAIL_AT and STATE.get("trail_price"):
         # حساب ATR باستخدام ta
         atr_indicator = ta.volatility.AverageTrueRange(df['high'], df['low'], df['close'], window=14)
-        atr = atr_indicator.average_true_range().iloc[-1]
+        atr_series = atr_indicator.average_true_range()
+        atr = atr_series.iloc[-1] if len(atr_series) > 0 else 0
         
-        if STATE["side"] == "buy":
-            tighter_trail = current_price - atr * (ATR_TRAIL_MULT * 0.7)
-            if tighter_trail > STATE["trail_price"]:
-                STATE["trail_price"] = tighter_trail
-                log_sniper("TRAIL_TIGHTENED", f"Tight trail: {tighter_trail:.6f}")
-        
-        else:
-            tighter_trail = current_price + atr * (ATR_TRAIL_MULT * 0.7)
-            if tighter_trail < STATE["trail_price"]:
-                STATE["trail_price"] = tighter_trail
-                log_sniper("TRAIL_TIGHTENED", f"Tight trail: {tighter_trail:.6f}")
+        if atr > 0:
+            if STATE["side"] == "buy":
+                tighter_trail = current_price - atr * (ATR_TRAIL_MULT * 0.7)
+                if tighter_trail > STATE["trail_price"]:
+                    STATE["trail_price"] = tighter_trail
+                    log_sniper("TRAIL_TIGHTENED", f"Tight trail: {tighter_trail:.6f}")
+            
+            else:
+                tighter_trail = current_price + atr * (ATR_TRAIL_MULT * 0.7)
+                if tighter_trail < STATE["trail_price"]:
+                    STATE["trail_price"] = tighter_trail
+                    log_sniper("TRAIL_TIGHTENED", f"Tight trail: {tighter_trail:.6f}")
     
     # 5. Defense System
     defense = DefenseSystem()
