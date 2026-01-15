@@ -19,7 +19,7 @@ import numpy as np
 import ccxt
 from flask import Flask, jsonify
 from decimal import Decimal, ROUND_DOWN, InvalidOperation
-import talib
+import pandas_ta as ta  # استبدال talib بـ pandas-ta
 from scipy import stats
 
 try:
@@ -838,53 +838,52 @@ def compute_flow_metrics(df):
 
 # =================== ADVANCED INDICATORS ===================
 def compute_advanced_indicators(df):
-    """حساب المؤشرات المتقدمة"""
+    """حساب المؤشرات المتقدمة باستخدام pandas-ta"""
     try:
         close = df['close'].astype(float)
         high = df['high'].astype(float)
         low = df['low'].astype(float)
         volume = df['volume'].astype(float)
         
-        # مؤشرات الترند
-        sma_20 = talib.SMA(close, timeperiod=20)
-        sma_50 = talib.SMA(close, timeperiod=50)
-        ema_20 = talib.EMA(close, timeperiod=20)
+        # مؤشرات الترند باستخدام pandas-ta
+        sma_20 = ta.sma(close, length=20)
+        sma_50 = ta.sma(close, length=50)
+        ema_20 = ta.ema(close, length=20)
         
         # مؤشرات الزخم
-        rsi = talib.RSI(close, timeperiod=14)
-        macd, macd_signal, macd_hist = talib.MACD(close)
-        stoch_k, stoch_d = talib.STOCH(high, low, close)
+        rsi = ta.rsi(close, length=14)
+        macd_result = ta.macd(close)
+        stoch_result = ta.stoch(high, low, close)
         
         # مؤشرات التقلب
-        atr = talib.ATR(high, low, close, timeperiod=14)
-        bollinger_upper, bollinger_middle, bollinger_lower = talib.BBANDS(close, timeperiod=20, nbdevup=2, nbdevdn=2)
+        atr = ta.atr(high, low, close, length=14)
+        bb_result = ta.bbands(close, length=20, std=2)
         
         # مؤشرات الحجم
-        obv = talib.OBV(close, volume)
+        obv = ta.obv(close, volume)
         
         # مؤشرات الاتجاه
-        adx = talib.ADX(high, low, close, timeperiod=14)
-        plus_di = talib.PLUS_DI(high, low, close, timeperiod=14)
-        minus_di = talib.MINUS_DI(high, low, close, timeperiod=14)
+        adx_result = ta.adx(high, low, close, length=14)
         
+        # استخراج القيم
         return {
             'sma_20': last_scalar(sma_20),
             'sma_50': last_scalar(sma_50),
             'ema_20': last_scalar(ema_20),
             'rsi': last_scalar(rsi),
-            'macd': last_scalar(macd),
-            'macd_signal': last_scalar(macd_signal),
-            'macd_hist': last_scalar(macd_hist),
-            'stoch_k': last_scalar(stoch_k),
-            'stoch_d': last_scalar(stoch_d),
+            'macd': last_scalar(macd_result.get('MACD_12_26_9', pd.Series([0]))),
+            'macd_signal': last_scalar(macd_result.get('MACDs_12_26_9', pd.Series([0]))),
+            'macd_hist': last_scalar(macd_result.get('MACDh_12_26_9', pd.Series([0]))),
+            'stoch_k': last_scalar(stoch_result.get('STOCHk_14_3_3', pd.Series([50]))),
+            'stoch_d': last_scalar(stoch_result.get('STOCHd_14_3_3', pd.Series([50]))),
             'atr': last_scalar(atr),
-            'bollinger_upper': last_scalar(bollinger_upper),
-            'bollinger_liddle': last_scalar(bollinger_middle),
-            'bollinger_lower': last_scalar(bollinger_lower),
+            'bollinger_upper': last_scalar(bb_result.get('BBU_20_2.0', pd.Series([close.iloc[-1]]))),
+            'bollinger_middle': last_scalar(bb_result.get('BBM_20_2.0', pd.Series([close.iloc[-1]]))),
+            'bollinger_lower': last_scalar(bb_result.get('BBL_20_2.0', pd.Series([close.iloc[-1]]))),
             'obv': last_scalar(obv),
-            'adx': last_scalar(adx),
-            'plus_di': last_scalar(plus_di),
-            'minus_di': last_scalar(minus_di),
+            'adx': last_scalar(adx_result.get('ADX_14', pd.Series([0]))),
+            'plus_di': last_scalar(adx_result.get('DMP_14', pd.Series([0]))),
+            'minus_di': last_scalar(adx_result.get('DMN_14', pd.Series([0]))),
             'volume': last_scalar(volume)
         }
     except Exception as e:
@@ -912,10 +911,31 @@ def ultra_intelligent_council_ai(df):
         indicators = advanced_indicators
         
         # تحليل الشموع المتقدم
-        candles = compute_candles(df) if 'compute_candles' in globals() else {}
+        candles = {}
+        try:
+            # تحليل شموع بسيط
+            current_candle = df.iloc[-1]
+            prev_candle = df.iloc[-2] if len(df) > 1 else current_candle
+            
+            # تحليل نمط الشموع
+            candle_body = abs(current_candle['close'] - current_candle['open'])
+            candle_range = current_candle['high'] - current_candle['low']
+            body_ratio = candle_body / candle_range if candle_range > 0 else 0
+            
+            is_bullish = current_candle['close'] > current_candle['open']
+            is_strong_bullish = is_bullish and body_ratio > 0.7
+            is_strong_bearish = not is_bullish and body_ratio > 0.7
+            
+            candles = {
+                'score_buy': 2.0 if is_strong_bullish else 0.5 if is_bullish else 0,
+                'score_sell': 2.0 if is_strong_bearish else 0.5 if not is_bullish else 0,
+                'pattern': 'strong_bull' if is_strong_bullish else 'strong_bear' if is_strong_bearish else 'normal'
+            }
+        except:
+            candles = {'score_buy': 0, 'score_sell': 0, 'pattern': 'unknown'}
         
         # التحليل الفني المتقدم
-        golden_zone = golden_zone_check(df, indicators) if 'golden_zone_check' in globals() else {}
+        golden_zone = {}
         flow_metrics = compute_flow_metrics(df)
         orderbook = bookmap_snapshot(ex, SYMBOL)
         
