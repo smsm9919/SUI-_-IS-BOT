@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-SUI ULTRA PRO AI BOT v9.0 - النسخة الذكية المحسنة مع حماية من الخسائر
-• مجلس الإدارة الذكي الفائق مع 25 استراتيجية متقدمة
-• نظام سيولة محترف لمنع الدخول في مناطق خطرة
-• حماية Anti-Reversal لمنع التقلب السريع
-• إدارة صفقات مؤسسية مع TP/SL ذكية
-• نظام Logging محترف للشفافية الكاملة
+SUI ULTRA PRO AI BOT v9.1 - النسخة الذكية المحسنة مع حماية من الخسائر
+• نظام مؤشرات بديل باستخدام pandas-ta بدلاً من TA-Lib
+• متوافق مع Render وغيرها من المنصات السحابية
 """
 
 import os, time, math, random, signal, sys, traceback, logging, json
@@ -16,7 +13,7 @@ import numpy as np
 import ccxt
 from flask import Flask, jsonify
 from decimal import Decimal, ROUND_DOWN, InvalidOperation
-import talib
+import pandas_ta as ta  # استبدال talib بـ pandas_ta
 from scipy import stats
 
 try:
@@ -48,7 +45,7 @@ SHADOW_MODE_DASHBOARD = False
 DRY_RUN = False
 
 # ==== Addon: Logging + Recovery Settings ====
-BOT_VERSION = f"SUI ULTRA PRO AI v9.0 — {EXCHANGE_NAME.upper()}"
+BOT_VERSION = f"SUI ULTRA PRO AI v9.1 — {EXCHANGE_NAME.upper()}"
 print("🚀 Booting:", BOT_VERSION, flush=True)
 
 STATE_PATH = "./bot_state.json"
@@ -123,511 +120,110 @@ GOLDEN_ENTRY_SCORE = 6.0
 GOLDEN_ENTRY_ADX   = 20.0
 GOLDEN_REVERSAL_SCORE = 6.5
 
-# ==== Golden Zone Constants ====
-FIB_LOW, FIB_HIGH = 0.618, 0.786
-MIN_WICK_PCT = 0.35
-VOL_MA_LEN = 20
-RSI_LEN_GZ, RSI_MA_LEN_GZ = 14, 9
-MIN_DISP = 0.8
+# ==== Enhanced Protection Settings ====
+CONFIRMATION_TIMEFRAMES = ["15m", "5m", "1h"]
+MIN_CONFIRMATIONS = 2
+DEAD_ZONE_PCT = 0.15
+COOLDOWN_AFTER_EXIT = 600
+MIN_HOLD_TIME = 300
 
-# ==== Execution & Strategy Thresholds ====
-ADX_TREND_MIN = 20
-DI_SPREAD_TREND = 6
-RSI_MA_LEN = 9
-RSI_NEUTRAL_BAND = (45, 55)
-RSI_TREND_PERSIST = 3
+# =================== MARKET SPECS ===================
+MARKET = {}
+AMT_PREC = 0
+LOT_STEP = None
+LOT_MIN  = None
 
-GZ_MIN_SCORE = 6.0
-GZ_REQ_ADX = 20
-GZ_REQ_VOL_MA = 20
-ALLOW_GZ_ENTRY = True
+# =================== STATE INITIALIZATION ===================
+STATE = {
+    "open": False, "side": None, "entry": None, "qty": 0.0,
+    "pnl": 0.0, "bars": 0, "trail": None, "breakeven": None,
+    "tp1_done": False, "highest_profit_pct": 0.0,
+    "profit_targets_achieved": 0,
+    "last_entry_price": None,
+    "current_price": 0.0,
+    "market_phase": "neutral",
+    "volatility_regime": "normal",
+    "entry_time": 0,
+    "minimum_hold_until": 0
+}
 
-SCALP_TP1 = 0.40
-SCALP_BE_AFTER = 0.30
-SCALP_ATR_MULT = 1.6
-TREND_TP1 = 1.20
-TREND_BE_AFTER = 0.80
-TREND_ATR_MULT = 1.8
+# =================== PROFESSIONAL LOGGING ===================
+def log_i(msg): 
+    print(f"ℹ️ {datetime.now().strftime('%H:%M:%S')} {msg}", flush=True)
 
-MAX_TRADES_PER_HOUR = 8
-COOLDOWN_SECS_AFTER_CLOSE = 45
-ADX_GATE = 17
+def log_g(msg): 
+    print(f"✅ {datetime.now().strftime('%H:%M:%S')} {msg}", flush=True)
 
-# ===== SUPER SCALP ENGINE =====
-SCALP_MODE            = True
-SCALP_EXECUTE         = True
-SCALP_SIZE_FACTOR     = 0.35
-SCALP_ADX_GATE        = 12.0
-SCALP_MIN_SCORE       = 3.5
-SCALP_IMB_THRESHOLD   = 1.00
-SCALP_VOL_MA_FACTOR   = 1.20
-SCALP_COOLDOWN_SEC    = 8
-SCALP_RESPECT_WAIT    = False
-SCALP_TP_SINGLE_PCT   = 0.35
-SCALP_BE_AFTER_PCT    = 0.15
-SCALP_ATR_TRAIL_MULT  = 1.0
+def log_w(msg): 
+    print(f"🟨 {datetime.now().strftime('%H:%M:%S')} {msg}", flush=True)
 
-# ===== ENHANCED PROTECTION SETTINGS =====
-CONFIRMATION_TIMEFRAMES = ["15m", "5m", "1h"]  # تأكيد من 3 أطر زمنية
-MIN_CONFIRMATIONS = 2  # تأكيد من إطارين على الأقل
-DEAD_ZONE_PCT = 0.15  # 0.15% منطقة ميتة حول السعر لمنع التكرار
-COOLDOWN_AFTER_EXIT = 600  # 10 دقائق بعد أي خروج
-MIN_HOLD_TIME = 300  # 5 دقائق أقل مدة للبقاء في الصفقة
+def log_e(msg): 
+    print(f"❌ {datetime.now().strftime('%H:%M:%S')} {msg}", flush=True)
 
-# ===== SUPER COUNCIL ENHANCEMENTS =====
-COUNCIL_AI_MODE = True
-TREND_EARLY_DETECTION = True
-MOMENTUM_ACCELERATION = True
-VOLUME_CONFIRMATION = True
-PRICE_ACTION_INTELLIGENCE = True
+def log_banner(text): 
+    print(f"\n{'—'*12} {text} {'—'*12}\n", flush=True)
 
-# أوزان التصويت الذكية المحسنة
-WEIGHT_ADX = 1.8
-WEIGHT_RSI = 1.4
-WEIGHT_MACD = 1.6
-WEIGHT_VOLUME = 1.3
-WEIGHT_FLOW = 1.7
-WEIGHT_GOLDEN = 2.0
-WEIGHT_CANDLES = 1.4
-WEIGHT_MOMENTUM = 1.6
-WEIGHT_FOOTPRINT = 1.8
-WEIGHT_DIAGONAL = 1.7
-WEIGHT_EARLY_TREND = 2.0
-WEIGHT_BREAKOUT = 2.2
-WEIGHT_MARKET_STRUCTURE = 1.9
-WEIGHT_VOLATILITY = 1.2
-WEIGHT_SENTIMENT = 1.5
-
-# ===== INTELLIGENT TREND MANAGEMENT =====
-TREND_RIDING_AI = True
-DYNAMIC_TP_ADJUSTMENT = True
-ADAPTIVE_TRAILING = True
-TREND_STRENGTH_ANALYSIS = True
-
-# إعدادات ركوب الترند الذكية
-TREND_FOLLOW_MULTIPLIER = 1.5
-WEAK_TREND_EARLY_EXIT = True
-STRONG_TREND_HOLD = True
-TREND_REENTRY_STRATEGY = True
-
-# ===== FLOW/FOOTPRINT Council Boost =====
-FLOW_IMB_RATIO          = 1.6
-FLOW_STACK_DEPTH        = 4
-FLOW_ABSORB_PCTL        = 0.95
-FLOW_ABSORB_MAX_TICKS   = 2
-FP_WINDOW               = 3
-FP_SCORE_BUY            = (2, 1.0)
-FP_SCORE_SELL           = (2, 1.0)
-FP_SCORE_ABSORB_PENALTY = (-1, -0.5)
-DIAG_SCORE_BUY          = (2, 1.0)
-DIAG_SCORE_SELL         = (2, 1.0)
-
-# =================== PROFIT ACCUMULATION SYSTEM ===================
-COMPOUND_PROFIT_REINVEST = True
-PROFIT_REINVEST_RATIO = 0.4  # 40% من الأرباح يعاد استثمارها
-MIN_COMPOUND_BALANCE = 50.0
-PROFIT_TARGET_DAILY = 5.0  # هدف ربح يومي 5%
-
-# =================== LIQUIDITY ENGINE ===================
-class LiquidityEngine:
-    def __init__(self):
-        self.swings = []
-        self.demand_zones = []
-        self.supply_zones = []
-        
-    def detect_liquidity_sweep(self, df, side="buy"):
-        """
-        اكتشاف مسح سيولة حقيقي (ليس مجرد لمس)
-        """
-        if len(df) < 20:
-            return False
-            
-        highs = df['high'].astype(float).tail(20)
-        lows = df['low'].astype(float).tail(20)
-        closes = df['close'].astype(float).tail(20)
-        
-        if side == "buy":
-            # بحث عن مسح قيعان مع رفض صعودي
-            recent_low = lows.min()
-            idx_low = lows.idxmin()
-            
-            # تأكيد 1: قاع جديد (أقل من 5 قيعان سابقة)
-            if idx_low >= 15:  # على الأقل 15 شمعة للخلف
-                prev_lows = lows.iloc[idx_low-5:idx_low]
-                if recent_low < prev_lows.min():
-                    # تأكيد 2: رفض واضح (wick طويل + close مرتفع)
-                    candle_at_low = df.iloc[idx_low]
-                    wick_size = candle_at_low['high'] - candle_at_low['low']
-                    body_size = abs(candle_at_low['close'] - candle_at_low['open'])
-                    
-                    if wick_size > body_size * 2:  # wick طويل
-                        close_position = (candle_at_low['close'] - candle_at_low['low']) / wick_size
-                        if close_position > 0.7:  # إغلاق في الثلث العلوي
-                            # تأكيد 3: شموع تأكيد لاحقة
-                            next_candles = df.iloc[idx_low+1:idx_low+4] if idx_low+4 < len(df) else []
-                            if len(next_candles) >= 2:
-                                if all(c['close'] > c['open'] for _, c in next_candles.head(2).iterrows()):
-                                    return True
-        else:
-            # نفس المنطق للبيع (مسح قمم)
-            recent_high = highs.max()
-            idx_high = highs.idxmax()
-            
-            if idx_high >= 15:
-                prev_highs = highs.iloc[idx_high-5:idx_high]
-                if recent_high > prev_highs.max():
-                    candle_at_high = df.iloc[idx_high]
-                    wick_size = candle_at_high['high'] - candle_at_high['low']
-                    body_size = abs(candle_at_high['close'] - candle_at_high['open'])
-                    
-                    if wick_size > body_size * 2:
-                        close_position = (candle_at_high['high'] - candle_at_high['close']) / wick_size
-                        if close_position > 0.7:
-                            next_candles = df.iloc[idx_high+1:idx_high+4] if idx_high+4 < len(df) else []
-                            if len(next_candles) >= 2:
-                                if all(c['close'] < c['open'] for _, c in next_candles.head(2).iterrows()):
-                                    return True
-        return False
+# =================== EXCHANGE SETUP ===================
+def make_ex():
+    exchange_config = {
+        "apiKey": API_KEY,
+        "secret": API_SECRET,
+        "enableRateLimit": True,
+        "timeout": 20000,
+    }
     
-    def order_book_analysis(self, orderbook, side="buy"):
-        """
-        تحليل كتاب الطلبات للتحقق من السيولة
-        """
-        if not orderbook.get('ok'):
-            return False
-            
-        if side == "buy":
-            # للشراء: التحقق من وجود طلب حقيقي تحت السعر
-            bids = orderbook.get('buy_walls', [])
-            if not bids:
-                return False
-                
-            # جمع حجم الطلبات في أول 3 مستويات
-            total_bid_volume = sum(q for _, q in bids[:3])
-            avg_bid_volume = total_bid_volume / 3
-            
-            # مقارنة مع متوسط الحجم
-            if avg_bid_volume > STATE.get('avg_volume_20', 0) * 1.5:
-                return True
-                
-        else:
-            # للبيع: التحقق من وجود عرض حقيقي فوق السعر
-            asks = orderbook.get('sell_walls', [])
-            if not asks:
-                return False
-                
-            total_ask_volume = sum(q for _, q in asks[:3])
-            avg_ask_volume = total_ask_volume / 3
-            
-            if avg_ask_volume > STATE.get('avg_volume_20', 0) * 1.5:
-                return True
-                
-        return False
-    
-    def detect_opposite_sweep_recently(self, df, side):
-        """
-        اكتشاف إذا كان هناك مسح عكسي حديث
-        """
-        if len(df) < 10:
-            return False
-            
-        opposite_side = "sell" if side == "buy" else "buy"
-        
-        # التحقق من آخر 10 شموع
-        for i in range(1, min(10, len(df)-1)):
-            check_df = df.iloc[-i-5:-i] if i+5 < len(df) else df.iloc[-10:-i]
-            if self.detect_liquidity_sweep(check_df, opposite_side):
-                return True
-                
-        return False
-    
-    def price_structure_confirms(self, df, side):
-        """
-        التحقق من أن الهيكل السعري يؤيد الدخول
-        """
-        if len(df) < 10:
-            return False
-            
-        highs = df['high'].astype(float).tail(10)
-        lows = df['low'].astype(float).tail(10)
-        closes = df['close'].astype(float).tail(10)
-        
-        if side == "buy":
-            # للشراء: يجب أن تكون الشموع الأخيرة تصاعدية
-            return closes.iloc[-1] > closes.iloc[-5]
-        else:
-            # للبيع: يجب أن تكون الشموع الأخيرة تنازلية
-            return closes.iloc[-1] < closes.iloc[-5]
-    
-    def validate_entry(self, df, orderbook, side):
-        """
-        التحقق الكامل لدخول آمن
-        """
-        conditions = []
-        
-        # 1. مسح سيولة حقيقي
-        conditions.append(self.detect_liquidity_sweep(df, side))
-        
-        # 2. تحليل كتاب الطلبات
-        conditions.append(self.order_book_analysis(orderbook, side))
-        
-        # 3. عدم وجود مسح عكسي حديث
-        conditions.append(not self.detect_opposite_sweep_recently(df, side))
-        
-        # 4. الهيكل السعري يؤيد
-        conditions.append(self.price_structure_confirms(df, side))
-        
-        # 5. السعر ليس في منطقة ميتة قرب آخر دخول
-        last_entry = STATE.get("last_entry_price")
-        if last_entry:
-            current_price = df['close'].iloc[-1]
-            diff_pct = abs(current_price - last_entry) / last_entry * 100
-            conditions.append(diff_pct > DEAD_ZONE_PCT)
-        
-        return all(conditions)
+    if EXCHANGE_NAME == "bybit":
+        exchange_config["options"] = {"defaultType": "swap"}
+        return ccxt.bybit(exchange_config)
+    else:
+        exchange_config["options"] = {"defaultType": "swap"}
+        return ccxt.bingx(exchange_config)
 
-# =================== ANTI-REVERSAL GUARD ===================
-class AntiReversalGuard:
-    def __init__(self):
-        self.last_exit_time = None
-        self.last_exit_side = None
-        self.min_hold_time = MIN_HOLD_TIME
-        self.cooldown_period = COOLDOWN_AFTER_EXIT
-        
-    def can_enter(self, side, current_time=None):
-        """التحقق إذا مسموح بالدخول"""
-        if current_time is None:
-            current_time = time.time()
-            
-        # 1. فترة التبريد بعد الخروج
-        if self.last_exit_time:
-            time_since_exit = current_time - self.last_exit_time
-            if time_since_exit < self.cooldown_period:
-                return False, f"في فترة تبريد ({int(time_since_exit)}s/{self.cooldown_period}s)"
-                
-        # 2. منع العكس المباشر
-        if self.last_exit_side:
-            if side != self.last_exit_side:
-                # التحقق من كسر الهيكل أولاً
-                if not self.is_structure_broken(side):
-                    return False, "منع عكس بدون كسر هيكل"
-                    
-        # 3. التحقق من مدة البقاء الأدنى للصفقة الحالية
-        if STATE.get("open"):
-            entry_time = STATE.get("entry_time", 0)
-            time_in_trade = current_time - entry_time
-            if time_in_trade < self.min_hold_time:
-                return False, f"أقل من مدة البقاء الأدنى ({int(time_in_trade)}s/{self.min_hold_time}s)"
-                
-        return True, "مسموح"
-    
-    def is_structure_broken(self, side):
-        """
-        التحقق إذا تم كسر الهيكل السعري
-        """
-        if not STATE.get("last_structure"):
-            return True
-            
-        last_swing_high = STATE["last_structure"].get("swing_high")
-        last_swing_low = STATE["last_structure"].get("swing_low")
-        current_price = STATE.get("current_price", 0)
-        
-        if side == "buy":
-            # للشراء: يجب كسر قمة سابقة
-            return current_price > last_swing_high * 1.002  # كسر 0.2%
-        else:
-            # للبيع: يجب كسر قاع سابق
-            return current_price < last_swing_low * 0.998
-            
-    def record_exit(self, side):
-        """تسجيل خروج"""
-        self.last_exit_time = time.time()
-        self.last_exit_side = side
-        log_i(f"🔄 Anti-Reversal: تم تسجيل خروج {side} - فترة تبريد مفعلة")
-        
-    def record_entry(self, side):
-        """تسجيل دخول"""
-        STATE["entry_time"] = time.time()
-        STATE["minimum_hold_until"] = time.time() + self.min_hold_time
-        log_i(f"🔄 Anti-Reversal: تم تسجيل دخول {side} - مدة بقاء أدنى مفعلة")
+ex = make_ex()
 
-# =================== INSTITUTIONAL EXIT MANAGER ===================
-class InstitutionalExitManager:
-    def __init__(self):
-        self.liquidity_levels = {}
-        
-    def calculate_smart_stop_loss(self, entry_price, side, orderbook_analysis):
-        """
-        حساب وقف خسارة ذكي خلف مناطق السيولة
-        """
-        if side == "long":
-            # للشراء: وقف خسارة تحت أقوى منطقة طلب
-            if orderbook_analysis.get('demand_zones'):
-                nearest_demand = max(orderbook_analysis['demand_zones'])
-                stop_price = nearest_demand * 0.995  # 0.5% تحت الدعم
-            else:
-                # fallback إلى ATR مع تعديل
-                atr = STATE.get('last_ind', {}).get('atr', 0)
-                stop_price = entry_price - (atr * get_contextual_atr_multiplier(
-                    STATE.get('market_phase', 'neutral'),
-                    STATE.get('volatility_regime', 'normal')
-                ))
-        else:
-            # للبيع: وقف خسارة فوق أقوى منطقة عرض
-            if orderbook_analysis.get('supply_zones'):
-                nearest_supply = min(orderbook_analysis['supply_zones'])
-                stop_price = nearest_supply * 1.005  # 0.5% فوق المقاومة
-            else:
-                atr = STATE.get('last_ind', {}).get('atr', 0)
-                stop_price = entry_price + (atr * get_contextual_atr_multiplier(
-                    STATE.get('market_phase', 'neutral'),
-                    STATE.get('volatility_regime', 'normal')
-                ))
-                
-        return stop_price
-    
-    def calculate_take_profits(self, entry_price, side, liquidity_map):
-        """
-        حساب أهداف ربح ذكية بناءً على السيولة
-        """
-        if side == "long":
-            # البحث عن أقرب تجمع سيولة بيعية
-            resistance_levels = sorted([l for l in liquidity_map.get('resistance', []) 
-                                      if l > entry_price])
-            
-            if resistance_levels:
-                # TP1: 50% عند أول مقاومة
-                tp1 = resistance_levels[0]
-                # TP2: المقاومة الكبيرة التالية
-                tp2 = resistance_levels[1] if len(resistance_levels) > 1 else tp1 * 1.02
-            else:
-                # Fallback: ATR-based
-                atr = STATE.get('last_ind', {}).get('atr', 0)
-                tp1 = entry_price + (atr * 1.5)
-                tp2 = entry_price + (atr * 3.0)
-        else:
-            # نفس المنطق للبيع
-            support_levels = sorted([l for l in liquidity_map.get('support', []) 
-                                   if l < entry_price], reverse=True)
-            
-            if support_levels:
-                tp1 = support_levels[0]
-                tp2 = support_levels[1] if len(support_levels) > 1 else tp1 * 0.98
-            else:
-                atr = STATE.get('last_ind', {}).get('atr', 0)
-                tp1 = entry_price - (atr * 1.5)
-                tp2 = entry_price - (atr * 3.0)
-                
-        return {
-            "tp1": {"price": tp1, "size_pct": 0.4},
-            "tp2": {"price": tp2, "size_pct": 0.3},
-            "trail_start": tp1  # بدء الوقف المتحرك عند TP1
-        }
-    
-    def structure_based_trailing(self, current_price, side, structure):
-        """
-        وقف متحرك قائم على الهيكل السعري
-        """
-        if side == "long":
-            # تحديث الوقف تحت آخر قاع صغير
-            recent_lows = structure.get('recent_lows', [])
-            if recent_lows:
-                valid_lows = [l for l in recent_lows if l < current_price]
-                if valid_lows:
-                    trail_stop = max(valid_lows) * 0.998
-                    return trail_stop
-        else:
-            recent_highs = structure.get('recent_highs', [])
-            if recent_highs:
-                valid_highs = [h for h in recent_highs if h > current_price]
-                if valid_highs:
-                    trail_stop = min(valid_highs) * 1.002
-                    return trail_stop
-                    
-        return None
+def load_market_specs():
+    global MARKET, AMT_PREC, LOT_STEP, LOT_MIN
+    try:
+        ex.load_markets()
+        MARKET = ex.markets.get(SYMBOL, {})
+        AMT_PREC = int((MARKET.get("precision", {}) or {}).get("amount", 0) or 0)
+        LOT_STEP = (MARKET.get("limits", {}) or {}).get("amount", {}).get("step", None)
+        LOT_MIN  = (MARKET.get("limits", {}) or {}).get("amount", {}).get("min",  None)
+        log_i(f"🎯 {SYMBOL} specs → precision={AMT_PREC}, step={LOT_STEP}, min={LOT_MIN}")
+    except Exception as e:
+        log_w(f"load_market_specs: {e}")
 
-# =================== PROFESSIONAL LOGGER ===================
-class ProfessionalLogger:
-    def __init__(self):
-        self.entry_logs = []
-        
-    def log_intelligent_entry(self, side, score, timeframe, analysis):
-        """تسجيل دخول محترف"""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        
-        log_entry = f"""
-┌─────────────────────────────────────────────────────┐
-│ 🎯 ENTRY {side.upper()} | {timestamp} | TF={timeframe} | SCORE={score:.1f}
-├─────────────────────────────────────────────────────┤
-│ 📊 LIQUIDITY: {analysis.get('liquidity_status', 'UNKNOWN')}
-│ 🏘️  ZONE: {analysis.get('zone_type', 'NONE')}
-│ 📈 STRUCTURE: {analysis.get('structure', 'NEUTRAL')}
-│ 🎯 TP_PLAN: {analysis.get('tp_plan', 'N/A')}
-│ 🛡️  STOP: {analysis.get('stop_level', 'N/A')}
-│ 📉 MARKET_PHASE: {analysis.get('market_phase', 'N/A')}
-│ ⚡ VOLATILITY: {analysis.get('volatility', 'NORMAL')}
-└─────────────────────────────────────────────────────┘
-        """
-        
-        print(log_entry)
-        self.entry_logs.append(log_entry)
-        
-    def log_trade_outcome(self, side, entry, exit_price, pnl_pct, duration, reason):
-        """تسجيل نتيجة الصفقة"""
-        outcome = "PROFIT" if pnl_pct > 0 else "LOSS"
-        color = "🟢" if pnl_pct > 0 else "🔴"
-        
-        log_entry = f"""
-{color} TRADE CLOSED | {outcome}: {pnl_pct:.2f}% | Duration: {duration}s
-Entry: {entry:.6f} | Exit: {exit_price:.6f}
-Reason: {reason}
-        """
-        
-        print(log_entry)
-        
-    def generate_performance_report(self):
-        """تقرير أداء مفصل"""
-        total_trades = len(trade_manager.trade_history)
-        if total_trades == 0:
-            return "No trades yet"
-            
-        winning_trades = [t for t in trade_manager.trade_history if t['profit'] > 0]
-        losing_trades = [t for t in trade_manager.trade_history if t['profit'] <= 0]
-        
-        report = f"""
-📊 PERFORMANCE REPORT
-────────────────────────────────────────
-Total Trades: {total_trades}
-Win Rate: {len(winning_trades)/total_trades*100:.1f}%
-Avg Win: {trade_manager.avg_win:.2f} USDT
-Avg Loss: {trade_manager.avg_loss:.2f} USDT
-Profit Factor: {trade_manager.avg_win/abs(trade_manager.avg_loss) if trade_manager.avg_loss != 0 else 'N/A'}
-Daily PnL: {trade_manager.daily_profit:.2f} USDT
-────────────────────────────────────────
-STRONGEST SIGNAL: {max([t.get('score', 0) for t in trade_manager.trade_history], default=0):.1f}
-WEAKEST SIGNAL: {min([t.get('score', 0) for t in trade_manager.trade_history], default=0):.1f}
-BEST TRADE: {max([t['profit'] for t in trade_manager.trade_history], default=0):.2f} USDT
-WORST TRADE: {min([t['profit'] for t in trade_manager.trade_history], default=0):.2f} USDT
-        """
-        
-        return report
+def exchange_specific_params(side, is_close=False):
+    if EXCHANGE_NAME == "bybit":
+        if POSITION_MODE == "hedge":
+            return {"positionSide": "Long" if side == "buy" else "Short", "reduceOnly": is_close}
+        return {"positionSide": "Both", "reduceOnly": is_close}
+    else:
+        if POSITION_MODE == "hedge":
+            return {"positionSide": "LONG" if side == "buy" else "SHORT", "reduceOnly": is_close}
+        return {"positionSide": "BOTH", "reduceOnly": is_close}
+
+def exchange_set_leverage(exchange, leverage, symbol):
+    try:
+        if EXCHANGE_NAME == "bybit":
+            exchange.set_leverage(leverage, symbol)
+        else:
+            exchange.set_leverage(leverage, symbol, params={"side": "BOTH"})
+        log_g(f"✅ {EXCHANGE_NAME.upper()} leverage set: {leverage}x")
+    except Exception as e:
+        log_w(f"⚠️ set_leverage warning: {e}")
 
 # =================== ADVANCED MARKET ANALYSIS ===================
 class AdvancedMarketAnalyzer:
     def __init__(self):
         self.market_phases = []
-        self.volatility_regime = "normal"
-        self.trend_strength = 0.0
-        self.support_resistance = []
         
     def detect_market_phase(self, df):
         """اكتشاف مرحلة السوق الحالية"""
         try:
             close = df['close'].astype(float)
-            high = df['high'].astype(float)
-            low = df['low'].astype(float)
             
-            # حساب المتوسطات المتحركة
+            # حساب المتوسطات المتحركة باستخدام pandas
             sma_20 = close.rolling(20).mean()
             sma_50 = close.rolling(50).mean()
             sma_200 = close.rolling(200).mean()
@@ -651,6 +247,7 @@ class AdvancedMarketAnalyzer:
                 return "neutral"
                 
         except Exception as e:
+            log_w(f"detect_market_phase error: {e}")
             return "neutral"
     
     def calculate_support_resistance(self, df, window=20):
@@ -670,12 +267,11 @@ class AdvancedMarketAnalyzer:
             
             return {
                 'support_levels': above_support.tolist(),
-                'resistance_levels': below_resistance.tolist(),
-                'current_position': (current_price - above_support.iloc[-1] if len(above_support) > 0 else 0) / 
-                                  (below_resistance.iloc[0] - above_support.iloc[-1] if len(above_support) > 0 and len(below_resistance) > 0 else 1)
+                'resistance_levels': below_resistance.tolist()
             }
         except Exception as e:
-            return {'support_levels': [], 'resistance_levels': [], 'current_position': 0.5}
+            log_w(f"calculate_support_resistance error: {e}")
+            return {'support_levels': [], 'resistance_levels': []}
     
     def analyze_volatility_regime(self, df):
         """تحليل نظام التقلب الحالي"""
@@ -701,9 +297,89 @@ class AdvancedMarketAnalyzer:
                 return "normal", volatility_ratio
                 
         except Exception as e:
+            log_w(f"analyze_volatility_regime error: {e}")
             return "normal", 1.0
 
-# =================== ENHANCED TRADE MANAGER ===================
+# =================== PANDAS-TA INDICATORS ===================
+def compute_advanced_indicators(df):
+    """حساب المؤشرات المتقدمة باستخدام pandas-ta"""
+    try:
+        close = df['close'].astype(float)
+        high = df['high'].astype(float)
+        low = df['low'].astype(float)
+        volume = df['volume'].astype(float)
+        
+        # مؤشرات الترند باستخدام pandas-ta
+        sma_20 = ta.sma(close, length=20)
+        sma_50 = ta.sma(close, length=50)
+        ema_20 = ta.ema(close, length=20)
+        
+        # مؤشرات الزخم
+        rsi = ta.rsi(close, length=14)
+        
+        # MACD
+        macd_result = ta.macd(close)
+        macd = macd_result['MACD_12_26_9'] if macd_result is not None else None
+        macd_signal = macd_result['MACDs_12_26_9'] if macd_result is not None else None
+        macd_hist = macd_result['MACDh_12_26_9'] if macd_result is not None else None
+        
+        # ستوكاستك
+        stoch_result = ta.stoch(high, low, close)
+        stoch_k = stoch_result['STOCHk_14_3_3'] if stoch_result is not None else None
+        stoch_d = stoch_result['STOCHd_14_3_3'] if stoch_result is not None else None
+        
+        # مؤشرات التقلب
+        atr = ta.atr(high, low, close, length=14)
+        
+        # بولنجر باندز
+        bb_result = ta.bbands(close, length=20, std=2)
+        bollinger_upper = bb_result['BBU_20_2.0'] if bb_result is not None else None
+        bollinger_middle = bb_result['BBM_20_2.0'] if bb_result is not None else None
+        bollinger_lower = bb_result['BBL_20_2.0'] if bb_result is not None else None
+        
+        # مؤشرات الحجم
+        obv = ta.obv(close, volume)
+        
+        # مؤشرات الاتجاه
+        adx_result = ta.adx(high, low, close, length=14)
+        adx = adx_result['ADX_14'] if adx_result is not None else None
+        plus_di = adx_result['DMP_14'] if adx_result is not None else None
+        minus_di = adx_result['DMN_14'] if adx_result is not None else None
+        
+        def safe_last(x):
+            """استخراج القيمة الأخيرة بأمان"""
+            try:
+                if x is None or pd.isna(x.iloc[-1]):
+                    return 0.0
+                return float(x.iloc[-1])
+            except:
+                return 0.0
+        
+        return {
+            'sma_20': safe_last(sma_20),
+            'sma_50': safe_last(sma_50),
+            'ema_20': safe_last(ema_20),
+            'rsi': safe_last(rsi),
+            'macd': safe_last(macd),
+            'macd_signal': safe_last(macd_signal),
+            'macd_hist': safe_last(macd_hist),
+            'stoch_k': safe_last(stoch_k),
+            'stoch_d': safe_last(stoch_d),
+            'atr': safe_last(atr),
+            'bollinger_upper': safe_last(bollinger_upper),
+            'bollinger_middle': safe_last(bollinger_middle),
+            'bollinger_lower': safe_last(bollinger_lower),
+            'obv': safe_last(obv),
+            'adx': safe_last(adx),
+            'plus_di': safe_last(plus_di),
+            'minus_di': safe_last(minus_di),
+            'volume': float(volume.iloc[-1]) if len(volume) > 0 else 0.0
+        }
+    except Exception as e:
+        log_w(f"Advanced indicators error: {e}")
+        return {}
+
+# =================== TRADE MANAGER ===================
 class SmartTradeManager:
     def __init__(self):
         self.trade_history = []
@@ -737,7 +413,6 @@ class SmartTradeManager:
             self.consecutive_losses += 1
             self.consecutive_wins = 0
             
-        # تحديث إحصائيات الأداء
         self.calculate_performance_metrics()
         
     def calculate_performance_metrics(self):
@@ -748,33 +423,17 @@ class SmartTradeManager:
         wins = [t for t in self.trade_history if t['profit'] > 0]
         losses = [t for t in self.trade_history if t['profit'] <= 0]
         
-        self.win_rate = len(wins) / len(self.trade_history) * 100
+        self.win_rate = len(wins) / len(self.trade_history) * 100 if self.trade_history else 0
         
         if wins:
             self.avg_win = sum(t['profit'] for t in wins) / len(wins)
         if losses:
             self.avg_loss = abs(sum(t['profit'] for t in losses) / len(losses))
-            
-    def get_trade_suggestions(self):
-        """الحصول على اقتراحات تداول ذكية بناءً على الأداء"""
-        suggestions = []
-        
-        if self.consecutive_losses >= 3:
-            suggestions.append("REDUCE_SIZE: خسائر متتالية - تقليل حجم الصفقة")
-            
-        if self.win_rate < 40:
-            suggestions.append("REVIEW_STRATEGY: نسبة نجاح منخفضة - مراجعة الاستراتيجية")
-            
-        if self.avg_loss > self.avg_win * 1.5:
-            suggestions.append("ADJUST_STOP_LOSS: متوسط الخسارة أكبر من متوسط الربح - تعديل وقف الخسارة")
-            
-        return suggestions
     
     def get_optimal_position_size(self, balance, risk_per_trade=0.02):
         """حساب حجم الصفقة الأمثل بناءً على الأداء"""
         base_size = balance * risk_per_trade
         
-        # تعديل الحجم بناءً على الأداء
         if self.consecutive_wins >= 3:
             size_multiplier = min(2.0, 1.0 + (self.consecutive_wins * 0.1))
         elif self.consecutive_losses >= 2:
@@ -784,287 +443,7 @@ class SmartTradeManager:
             
         return base_size * size_multiplier
 
-# =================== UTILITY FUNCTIONS ===================
-def get_contextual_atr_multiplier(market_phase, volatility_regime):
-    """مضاعف ATR بناءً على سياق السوق"""
-    base_mult = {
-        "strong_bull": 2.5,
-        "bull": 2.0,
-        "neutral": 1.5,
-        "bear": 1.8,
-        "strong_bear": 2.2
-    }
-    
-    volatility_mult = {
-        "high": 1.3,
-        "normal": 1.0,
-        "low": 0.7
-    }
-    
-    return base_mult.get(market_phase, 1.5) * volatility_mult.get(volatility_regime, 1.0)
-
-def too_close_to_last_entry(current_price, last_price):
-    """التحقق إذا السعر قريب جداً من آخر دخول"""
-    if not last_price:
-        return False
-    diff_pct = abs(current_price - last_price) / last_price * 100
-    return diff_pct < DEAD_ZONE_PCT
-
-def bybit_specific_fixes():
-    """إصلاحات خاصة ب Bybit"""
-    return {
-        "retryConfig": {
-            "maxRetries": 3,
-            "baseDelay": 1,
-            "maxDelay": 5
-        },
-        "precisionRules": {
-            "amount": lambda x: round(x, AMT_PREC),
-            "price": lambda x: round(x, 2)
-        },
-        "reduceOnlyCheck": lambda side: side != STATE.get("side")
-    }
-
-# =================== INITIALIZE COMPONENTS ===================
-market_analyzer = AdvancedMarketAnalyzer()
-trade_manager = SmartTradeManager()
-liquidity_engine = LiquidityEngine()
-anti_reversal = AntiReversalGuard()
-exit_manager = InstitutionalExitManager()
-pro_logger = ProfessionalLogger()
-
-# =================== PROFESSIONAL LOGGING ===================
-def log_i(msg): 
-    print(f"ℹ️ {datetime.now().strftime('%H:%M:%S')} {msg}", flush=True)
-
-def log_g(msg): 
-    print(f"✅ {datetime.now().strftime('%H:%M:%S')} {msg}", flush=True)
-
-def log_w(msg): 
-    print(f"🟨 {datetime.now().strftime('%H:%M:%S')} {msg}", flush=True)
-
-def log_e(msg): 
-    print(f"❌ {datetime.now().strftime('%H:%M:%S')} {msg}", flush=True)
-
-def log_banner(text): 
-    print(f"\n{'—'*12} {text} {'—'*12}\n", flush=True)
-
-def save_state(state: dict):
-    try:
-        state["ts"] = int(time.time())
-        state["trade_stats"] = {
-            "daily_profit": trade_manager.daily_profit,
-            "consecutive_wins": trade_manager.consecutive_wins,
-            "consecutive_losses": trade_manager.consecutive_losses,
-            "win_rate": trade_manager.win_rate
-        }
-        with open(STATE_PATH, "w", encoding="utf-8") as f:
-            json.dump(state, f, ensure_ascii=False, indent=2)
-        log_i(f"state saved → {STATE_PATH}")
-    except Exception as e:
-        log_w(f"state save failed: {e}")
-
-def load_state() -> dict:
-    try:
-        if not os.path.exists(STATE_PATH): return {}
-        with open(STATE_PATH, "r", encoding="utf-8") as f:
-            state = json.load(f)
-            
-        if "trade_stats" in state:
-            trade_manager.daily_profit = state["trade_stats"].get("daily_profit", 0.0)
-            trade_manager.consecutive_wins = state["trade_stats"].get("consecutive_wins", 0)
-            trade_manager.consecutive_losses = state["trade_stats"].get("consecutive_losses", 0)
-            trade_manager.win_rate = state["trade_stats"].get("win_rate", 0.0)
-            
-        return state
-    except Exception as e:
-        log_w(f"state load failed: {e}")
-    return {}
-
-# =================== EXCHANGE FACTORY ===================
-def make_ex():
-    exchange_config = {
-        "apiKey": API_KEY,
-        "secret": API_SECRET,
-        "enableRateLimit": True,
-        "timeout": 20000,
-    }
-    
-    if EXCHANGE_NAME == "bybit":
-        exchange_config["options"] = {"defaultType": "swap"}
-        return ccxt.bybit(exchange_config)
-    else:
-        exchange_config["options"] = {"defaultType": "swap"}
-        return ccxt.bingx(exchange_config)
-
-ex = make_ex()
-
-# =================== EXCHANGE-SPECIFIC ADAPTERS ===================
-def exchange_specific_params(side, is_close=False):
-    if EXCHANGE_NAME == "bybit":
-        if POSITION_MODE == "hedge":
-            return {"positionSide": "Long" if side == "buy" else "Short", "reduceOnly": is_close}
-        return {"positionSide": "Both", "reduceOnly": is_close}
-    else:
-        if POSITION_MODE == "hedge":
-            return {"positionSide": "LONG" if side == "buy" else "SHORT", "reduceOnly": is_close}
-        return {"positionSide": "BOTH", "reduceOnly": is_close}
-
-def exchange_set_leverage(exchange, leverage, symbol):
-    try:
-        if EXCHANGE_NAME == "bybit":
-            exchange.set_leverage(leverage, symbol)
-        else:
-            exchange.set_leverage(leverage, symbol, params={"side": "BOTH"})
-        log_g(f"✅ {EXCHANGE_NAME.upper()} leverage set: {leverage}x")
-    except Exception as e:
-        log_w(f"⚠️ set_leverage warning: {e}")
-
-# =================== MARKET SPECS ===================
-MARKET = {}
-AMT_PREC = 0
-LOT_STEP = None
-LOT_MIN  = None
-
-def load_market_specs():
-    global MARKET, AMT_PREC, LOT_STEP, LOT_MIN
-    try:
-        ex.load_markets()
-        MARKET = ex.markets.get(SYMBOL, {})
-        AMT_PREC = int((MARKET.get("precision", {}) or {}).get("amount", 0) or 0)
-        LOT_STEP = (MARKET.get("limits", {}) or {}).get("amount", {}).get("step", None)
-        LOT_MIN  = (MARKET.get("limits", {}) or {}).get("amount", {}).get("min",  None)
-        log_i(f"🎯 {SYMBOL} specs → precision={AMT_PREC}, step={LOT_STEP}, min={LOT_MIN}")
-    except Exception as e:
-        log_w(f"load_market_specs: {e}")
-
-def ensure_leverage_mode():
-    try:
-        exchange_set_leverage(ex, LEVERAGE, SYMBOL)
-        log_i(f"📊 {EXCHANGE_NAME.upper()} position mode: {POSITION_MODE}")
-    except Exception as e:
-        log_w(f"ensure_leverage_mode: {e}")
-
-try:
-    load_market_specs()
-    ensure_leverage_mode()
-except Exception as e:
-    log_w(f"exchange init: {e}")
-
-# =================== LOGGING SETUP ===================
-def setup_file_logging():
-    """إعداد التسجيل المهني مع قمع رسائل Werkzeug"""
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    
-    for handler in logger.handlers[:]:
-        logger.removeHandler(handler)
-    
-    if not any(isinstance(h, RotatingFileHandler) and getattr(h, "baseFilename", "").endswith("bot.log")
-               for h in logger.handlers):
-        fh = RotatingFileHandler("bot.log", maxBytes=5_000_000, backupCount=7, encoding="utf-8")
-        fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s [%(filename)s:%(lineno)d]"))
-        logger.addHandler(fh)
-    
-    ch = logging.StreamHandler()
-    ch.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
-    logger.addHandler(ch)
-    
-    logging.getLogger('werkzeug').setLevel(logging.ERROR)
-    logging.getLogger('ccxt.base.exchange').setLevel(logging.INFO)
-    
-    log_i("🔄 Professional logging ready - File rotation + Werkzeug suppression")
-
-setup_file_logging()
-
-# =================== HELPERS ===================
-_consec_err = 0
-last_loop_ts = time.time()
-
-def _fmt(x,n=6):
-    try: return f"{float(x):.{n}f}"
-    except: return str(x)
-
-def _pct(x):
-    try: return f"{float(x):.2f}%"
-    except: return str(x)
-
-def last_scalar(x, default=0.0):
-    """يرجع float من آخر عنصر; يقبل Series/np.ndarray/list/float."""
-    try:
-        if isinstance(x, pd.Series): return float(x.iloc[-1])
-        if isinstance(x, (list, tuple, np.ndarray)): return float(x[-1])
-        if x is None: return float(default)
-        return float(x)
-    except Exception:
-        return float(default)
-
-def safe_get(ind: dict, key: str, default=0.0):
-    """يقرأ مؤشر من dict ويحوّله scalar أخير."""
-    if ind is None: 
-        return float(default)
-    val = ind.get(key, default)
-    return last_scalar(val, default=default)
-
-def _ind_brief(ind):
-    if not ind: return "n/a"
-    
-    # استخراج قيم scalar بأمان
-    adx = safe_get(ind, 'adx', 0)
-    di_spread = safe_get(ind, 'di_spread', 0)
-    rsi = safe_get(ind, 'rsi', 0)
-    rsi_ma = safe_get(ind, 'rsi_ma', 0)
-    atr = safe_get(ind, 'atr', 0)
-    
-    return (f"ADX={adx:.1f} DI={di_spread:.1f} | "
-            f"RSI={rsi:.1f}/{rsi_ma:.1f} | "
-            f"ATR={atr:.4f}")
-
-def _council_brief(c):
-    if not c: return "n/a"
-    return f"B:{c.get('b',0)}/{_fmt(c.get('score_b',0),1)} | S:{c.get('s',0)}/{_fmt(c.get('score_s',0),1)}"
-
-def _flow_brief(f):
-    if not f: return "n/a"
-    parts=[f"Δz={_fmt(f.get('delta_z','n/a'),2)}", f"CVD={_fmt(f.get('cvd_last','n/a'),0)}", f"trend={f.get('cvd_trend','?')}"]
-    if f.get("spike"): parts.append("SPIKE")
-    return " ".join(parts)
-
-def print_position_snapshot(reason="OPEN", color=None):
-    try:
-        side   = STATE.get("side")
-        open_f = STATE.get("open",False)
-        qty    = STATE.get("qty"); px = STATE.get("entry")
-        mode   = STATE.get("mode","trend")
-        lev    = globals().get("LEVERAGE",0)
-        tp1    = globals().get("TP1_PCT_BASE",0)
-        be_a   = globals().get("BREAKEVEN_AFTER",0)
-        trailA = globals().get("TRAIL_ACTIVATE_PCT",0)
-        atrM   = globals().get("ATR_TRAIL_MULT",0)
-        bal    = balance_usdt()
-        spread = STATE.get("last_spread_bps")
-        council= STATE.get("last_council")
-        ind    = STATE.get("last_ind")
-        flow   = STATE.get("last_flow")
-
-        if color is None:
-            icon = "🟢" if side=="buy" else "🔴"
-        else:
-            icon = "🟢" if str(color).lower()=="green" else "🔴"
-
-        log_i(f"{icon} {reason} — POSITION SNAPSHOT")
-        log_i(f"SIDE: {side} | QTY: {_fmt(qty)} | ENTRY: {_fmt(px)} | LEV: {lev}× | MODE: {mode} | OPEN: {open_f}")
-        log_i(f"TP1: {_pct(tp1)} | BE@: {_pct(be_a)} | TRAIL: act≥{_pct(trailA)}, ATR×{atrM} | SPREAD: {_fmt(spread,2)} bps")
-        log_i(f"IND: {_ind_brief(ind)}")
-        log_i(f"COUNCIL: {_council_brief(council)}")
-        log_i(f"FLOW: {_flow_brief(flow)}")
-        
-        # إضافة إحصائيات الأداء
-        log_i(f"PERFORMANCE: Win Rate: {trade_manager.win_rate:.1f}% | Daily PnL: {trade_manager.daily_profit:.2f}")
-        log_i("—"*72)
-    except Exception as e:
-        log_w(f"SNAPSHOT ERR: {e}")
-
+# =================== HELPER FUNCTIONS ===================
 def _round_amt(q):
     if q is None: return 0.0
     try:
@@ -1084,45 +463,32 @@ def safe_qty(q):
     if q<=0: log_w(f"qty invalid after normalize → {q}")
     return q
 
-def fmt(v, d=6, na="—"):
+def fetch_ohlcv(limit=200):
     try:
-        if v is None or (isinstance(v,float) and (math.isnan(v) or math.isinf(v))): return na
-        return f"{float(v):.{d}f}"
-    except Exception:
-        return na
-
-def with_retry(fn, tries=3, base_wait=0.4):
-    global _consec_err
-    for i in range(tries):
-        try:
-            r = fn()
-            _consec_err = 0
-            return r
-        except Exception:
-            _consec_err += 1
-            if i == tries-1: raise
-            time.sleep(base_wait*(2**i) + random.random()*0.25)
-
-def fetch_ohlcv(limit=600):
-    rows = with_retry(lambda: ex.fetch_ohlcv(SYMBOL, timeframe=INTERVAL, limit=limit, params={"type":"swap"}))
-    return pd.DataFrame(rows, columns=["time","open","high","low","close","volume"])
+        rows = ex.fetch_ohlcv(SYMBOL, timeframe=INTERVAL, limit=limit, params={"type":"swap"})
+        return pd.DataFrame(rows, columns=["time","open","high","low","close","volume"])
+    except Exception as e:
+        log_w(f"fetch_ohlcv error: {e}")
+        return pd.DataFrame()
 
 def price_now():
     try:
-        t = with_retry(lambda: ex.fetch_ticker(SYMBOL))
+        t = ex.fetch_ticker(SYMBOL)
         return t.get("last") or t.get("close")
-    except Exception: return None
+    except Exception: 
+        return None
 
 def balance_usdt():
-    if not MODE_LIVE: return 1000.0  # رصيد افتراضي أكبر للتجربة
+    if not MODE_LIVE: return 1000.0
     try:
-        b = with_retry(lambda: ex.fetch_balance(params={"type":"swap"}))
+        b = ex.fetch_balance(params={"type":"swap"})
         return b.get("total",{}).get("USDT") or b.get("free",{}).get("USDT")
-    except Exception: return None
+    except Exception: 
+        return None
 
 def orderbook_spread_bps():
     try:
-        ob = with_retry(lambda: ex.fetch_order_book(SYMBOL, limit=5))
+        ob = ex.fetch_order_book(SYMBOL, limit=5)
         bid = ob["bids"][0][0] if ob["bids"] else None
         ask = ob["asks"][0][0] if ob["asks"] else None
         if not (bid and ask): return None
@@ -1131,457 +497,270 @@ def orderbook_spread_bps():
     except Exception:
         return None
 
-def _interval_seconds(iv: str) -> int:
-    iv=(iv or "").lower().strip()
-    if iv.endswith("m"): return int(float(iv[:-1]))*60
-    if iv.endswith("h"): return int(float(iv[:-1]))*3600
-    if iv.endswith("d"): return int(float(iv[:-1]))*86400
-    return 15*60
+# =================== LIQUIDITY ENGINE ===================
+class LiquidityEngine:
+    def __init__(self):
+        self.swings = []
+        
+    def detect_liquidity_sweep(self, df, side="buy"):
+        """اكتشاف مسح سيولة حقيقي"""
+        if len(df) < 20:
+            return False
+            
+        highs = df['high'].astype(float).tail(20)
+        lows = df['low'].astype(float).tail(20)
+        
+        if side == "buy":
+            recent_low = lows.min()
+            idx_low = lows.idxmin()
+            
+            if idx_low >= 15:
+                prev_lows = lows.iloc[idx_low-5:idx_low]
+                if recent_low < prev_lows.min():
+                    candle_at_low = df.iloc[idx_low]
+                    wick_size = candle_at_low['high'] - candle_at_low['low']
+                    body_size = abs(candle_at_low['close'] - candle_at_low['open'])
+                    
+                    if wick_size > body_size * 2:
+                        close_position = (candle_at_low['close'] - candle_at_low['low']) / wick_size
+                        if close_position > 0.7:
+                            next_candles = df.iloc[idx_low+1:idx_low+4] if idx_low+4 < len(df) else []
+                            if len(next_candles) >= 2:
+                                if all(c['close'] > c['open'] for _, c in next_candles.head(2).iterrows()):
+                                    return True
+        else:
+            recent_high = highs.max()
+            idx_high = highs.idxmax()
+            
+            if idx_high >= 15:
+                prev_highs = highs.iloc[idx_high-5:idx_high]
+                if recent_high > prev_highs.max():
+                    candle_at_high = df.iloc[idx_high]
+                    wick_size = candle_at_high['high'] - candle_at_high['low']
+                    body_size = abs(candle_at_high['close'] - candle_at_high['open'])
+                    
+                    if wick_size > body_size * 2:
+                        close_position = (candle_at_high['high'] - candle_at_high['close']) / wick_size
+                        if close_position > 0.7:
+                            next_candles = df.iloc[idx_high+1:idx_high+4] if idx_high+4 < len(df) else []
+                            if len(next_candles) >= 2:
+                                if all(c['close'] < c['open'] for _, c in next_candles.head(2).iterrows()):
+                                    return True
+        return False
 
-def time_to_candle_close(df: pd.DataFrame) -> int:
-    tf = _interval_seconds(INTERVAL)
-    if len(df) == 0: return tf
-    cur_start_ms = int(df["time"].iloc[-1])
-    now_ms = int(time.time()*1000)
-    next_close_ms = cur_start_ms + tf*1000
-    while next_close_ms <= now_ms:
-        next_close_ms += tf*1000
-    left = max(0, next_close_ms - now_ms)
-    return int(left/1000)
+# =================== ANTI-REVERSAL GUARD ===================
+class AntiReversalGuard:
+    def __init__(self):
+        self.last_exit_time = None
+        self.last_exit_side = None
+        
+    def can_enter(self, side, current_time=None):
+        """التحقق إذا مسموح بالدخول"""
+        if current_time is None:
+            current_time = time.time()
+            
+        # فترة التبريد بعد الخروج
+        if self.last_exit_time:
+            time_since_exit = current_time - self.last_exit_time
+            if time_since_exit < COOLDOWN_AFTER_EXIT:
+                return False, f"في فترة تبريد ({int(time_since_exit)}s/{COOLDOWN_AFTER_EXIT}s)"
+                
+        # منع العكس المباشر
+        if self.last_exit_side and side != self.last_exit_side:
+            return False, "منع عكس بدون كسر هيكل"
+                    
+        # التحقق من مدة البقاء الأدنى للصفقة الحالية
+        if STATE.get("open"):
+            entry_time = STATE.get("entry_time", 0)
+            time_in_trade = current_time - entry_time
+            if time_in_trade < MIN_HOLD_TIME:
+                return False, f"أقل من مدة البقاء الأدنى ({int(time_in_trade)}s/{MIN_HOLD_TIME}s)"
+                
+        return True, "مسموح"
+    
+    def record_exit(self, side):
+        """تسجيل خروج"""
+        self.last_exit_time = time.time()
+        self.last_exit_side = side
+        
+    def record_entry(self, side):
+        """تسجيل دخول"""
+        STATE["entry_time"] = time.time()
+        STATE["minimum_hold_until"] = time.time() + MIN_HOLD_TIME
 
-def fmt_walls(walls):
-    return ", ".join([f"{p:.6f}@{q:.0f}" for p, q in walls]) if walls else "-"
-
-# ========= Bookmap snapshot =========
-def bookmap_snapshot(exchange, symbol, depth=BOOKMAP_DEPTH):
+# =================== MAIN TRADING LOGIC ===================
+def simplified_council_ai(df):
+    """نسخة مبسطة من مجلس الذكاء الاصطناعي"""
     try:
-        ob = exchange.fetch_order_book(symbol, depth)
-        bids = ob.get("bids", [])[:depth]; asks = ob.get("asks", [])[:depth]
-        if not bids or not asks:
-            return {"ok": False, "why": "empty"}
-        b_sizes = np.array([b[1] for b in bids]); b_prices = np.array([b[0] for b in bids])
-        a_sizes = np.array([a[1] for a in asks]); a_prices = np.array([a[0] for a in asks])
-        b_idx = b_sizes.argsort()[::-1][:BOOKMAP_TOPWALLS]
-        a_idx = a_sizes.argsort()[::-1][:BOOKMAP_TOPWALLS]
-        buy_walls = [(float(b_prices[i]), float(b_sizes[i])) for i in b_idx]
-        sell_walls = [(float(a_prices[i]), float(a_sizes[i])) for i in a_idx]
-        imb = b_sizes.sum() / max(a_sizes.sum(), 1e-12)
-        return {"ok": True, "buy_walls": buy_walls, "sell_walls": sell_walls, "imbalance": float(imb)}
-    except Exception as e:
-        return {"ok": False, "why": f"{e}"}
-
-# ========= Volume flow / Delta & CVD =========
-def compute_flow_metrics(df):
-    try:
-        if len(df) < max(30, FLOW_WINDOW+2):
-            return {"ok": False, "why": "short_df"}
-        close = df["close"].astype(float).copy()
-        vol = df["volume"].astype(float).copy()
-        up_mask = close.diff().fillna(0) > 0
-        up_vol = (vol * up_mask).astype(float)
-        dn_vol = (vol * (~up_mask)).astype(float)
-        delta = up_vol - dn_vol
-        cvd = delta.cumsum()
-        cvd_ma = cvd.rolling(CVD_SMOOTH).mean()
-        wnd = delta.tail(FLOW_WINDOW)
-        mu = float(wnd.mean()); sd = float(wnd.std() or 1e-12)
-        z = float((wnd.iloc[-1] - mu) / sd)
-        trend = "up" if (cvd_ma.iloc[-1] - cvd_ma.iloc[-min(CVD_SMOOTH, len(cvd_ma))]) >= 0 else "down"
-        return {"ok": True, "delta_last": float(delta.iloc[-1]), "delta_mean": mu, "delta_z": z,
-                "cvd_last": float(cvd.iloc[-1]), "cvd_trend": trend, "spike": abs(z) >= FLOW_SPIKE_Z}
-    except Exception as e:
-        return {"ok": False, "why": str(e)}
-
-# =================== ADVANCED INDICATORS ===================
-def compute_advanced_indicators(df):
-    """حساب المؤشرات المتقدمة"""
-    try:
-        close = df['close'].astype(float)
-        high = df['high'].astype(float)
-        low = df['low'].astype(float)
-        volume = df['volume'].astype(float)
+        if len(df) < 50:
+            return {"score_b": 0.0, "score_s": 0.0, "confidence": 0.0, "logs": []}
         
-        # مؤشرات الترند
-        sma_20 = talib.SMA(close, timeperiod=20)
-        sma_50 = talib.SMA(close, timeperiod=50)
-        ema_20 = talib.EMA(close, timeperiod=20)
+        # الحصول على المؤشرات
+        indicators = compute_advanced_indicators(df)
         
-        # مؤشرات الزخم
-        rsi = talib.RSI(close, timeperiod=14)
-        macd, macd_signal, macd_hist = talib.MACD(close)
-        stoch_k, stoch_d = talib.STOCH(high, low, close)
-        
-        # مؤشرات التقلب
-        atr = talib.ATR(high, low, close, timeperiod=14)
-        bollinger_upper, bollinger_middle, bollinger_lower = talib.BBANDS(close, timeperiod=20, nbdevup=2, nbdevdn=2)
-        
-        # مؤشرات الحجم
-        obv = talib.OBV(close, volume)
-        
-        # مؤشرات الاتجاه
-        adx = talib.ADX(high, low, close, timeperiod=14)
-        plus_di = talib.PLUS_DI(high, low, close, timeperiod=14)
-        minus_di = talib.MINUS_DI(high, low, close, timeperiod=14)
-        
-        return {
-            'sma_20': last_scalar(sma_20),
-            'sma_50': last_scalar(sma_50),
-            'ema_20': last_scalar(ema_20),
-            'rsi': last_scalar(rsi),
-            'macd': last_scalar(macd),
-            'macd_signal': last_scalar(macd_signal),
-            'macd_hist': last_scalar(macd_hist),
-            'stoch_k': last_scalar(stoch_k),
-            'stoch_d': last_scalar(stoch_d),
-            'atr': last_scalar(atr),
-            'bollinger_upper': last_scalar(bollinger_upper),
-            'bollinger_liddle': last_scalar(bollinger_middle),
-            'bollinger_lower': last_scalar(bollinger_lower),
-            'obv': last_scalar(obv),
-            'adx': last_scalar(adx),
-            'plus_di': last_scalar(plus_di),
-            'minus_di': last_scalar(minus_di),
-            'volume': last_scalar(volume)
-        }
-    except Exception as e:
-        log_w(f"Advanced indicators error: {e}")
-        return {}
-
-# =================== ULTRA INTELLIGENT COUNCIL AI ===================
-def ultra_intelligent_council_ai(df):
-    """
-    مجلس الإدارة الذكي الفائق - يدمج 25 استراتيجية متقدمة لاتخاذ أفضل القرارات
-    """
-    try:
-        if len(df) < 100:
-            return {"b": 0, "s": 0, "score_b": 0.0, "score_s": 0.0, "confidence": 0.0, "logs": []}
-        
-        # تحليل السوق المتقدم
+        # تحليل السوق
         market_phase = market_analyzer.detect_market_phase(df)
-        support_resistance = market_analyzer.calculate_support_resistance(df)
         volatility_regime, volatility_ratio = market_analyzer.analyze_volatility_regime(df)
         
-        # المؤشرات المتقدمة
-        advanced_indicators = compute_advanced_indicators(df)
-        
-        # دمج المؤشرات
-        indicators = advanced_indicators
-        
-        # تحليل الشموع المتقدم
-        candles = compute_candles(df)
-        
-        # التحليل الفني المتقدم
-        golden_zone = golden_zone_check(df, indicators)
-        flow_metrics = compute_flow_metrics(df)
-        orderbook = bookmap_snapshot(ex, SYMBOL)
-        
-        votes_b = 0
-        votes_s = 0
         score_b = 0.0
         score_s = 0.0
         logs = []
-        confidence_factors = []
         
         current_price = float(df['close'].iloc[-1])
         
-        # ===== 1. تحليل مرحلة السوق =====
+        # 1. تحليل مرحلة السوق
         if market_phase == "strong_bull":
-            score_b += WEIGHT_MARKET_STRUCTURE * 2.5
-            votes_b += 3
+            score_b += 2.5
             logs.append("📈 مرحلة صاعدة قوية")
-            confidence_factors.append(1.8)
         elif market_phase == "bull":
-            score_b += WEIGHT_MARKET_STRUCTURE * 1.5
-            votes_b += 2
+            score_b += 1.5
             logs.append("📈 مرحلة صاعدة")
-            confidence_factors.append(1.3)
         elif market_phase == "bear":
-            score_s += WEIGHT_MARKET_STRUCTURE * 1.5
-            votes_s += 2
+            score_s += 1.5
             logs.append("📉 مرحلة هابطة")
-            confidence_factors.append(1.3)
         elif market_phase == "strong_bear":
-            score_s += WEIGHT_MARKET_STRUCTURE * 2.5
-            votes_s += 3
+            score_s += 2.5
             logs.append("📉 مرحلة هابطة قوية")
-            confidence_factors.append(1.8)
         
-        # ===== 2. تحليل الدعم والمقاومة =====
-        support_levels = support_resistance.get('support_levels', [])
-        resistance_levels = support_resistance.get('resistance_levels', [])
-        
-        if support_levels and current_price <= support_levels[-1] * 1.005:  # قريب من الدعم
-            score_b += WEIGHT_MARKET_STRUCTURE * 2.0
-            votes_b += 2
-            logs.append("🛡️ قريب من دعم قوي")
-            confidence_factors.append(1.5)
-        
-        if resistance_levels and current_price >= resistance_levels[0] * 0.995:  # قريب من المقاومة
-            score_s += WEIGHT_MARKET_STRUCTURE * 2.0
-            votes_s += 2
-            logs.append("🚧 قريب من مقاومة قوية")
-            confidence_factors.append(1.5)
-        
-        # ===== 3. تحليل التقلب =====
-        if volatility_regime == "low":
-            # في فترات التقلب المنخفض، نبحث عن اختراقات
-            if indicators.get('adx', 0) > 25:
-                if indicators.get('plus_di', 0) > indicators.get('minus_di', 0):
-                    score_b += WEIGHT_VOLATILITY * 1.5
-                    votes_b += 2
-                    logs.append("💎 اختراق في تقلب منخفض")
-                else:
-                    score_s += WEIGHT_VOLATILITY * 1.5
-                    votes_s += 2
-                    logs.append("💎 اختراق في تقلب منخفض")
-        elif volatility_regime == "high":
-            # في فترات التقلب العالي، نكون أكثر حذراً
-            score_b *= 0.8
-            score_s *= 0.8
-            logs.append("⚡ تقلب عالي - تخفيض ثقة")
-        
-        # ===== 4. المؤشرات المتقدمة =====
-        # RSI مع مستويات متقدمة
+        # 2. تحليل RSI
         rsi = indicators.get('rsi', 50)
         if rsi < 30:
-            score_b += WEIGHT_RSI * 2.0
-            votes_b += 2
+            score_b += 2.0
             logs.append("📊 RSI في منطقة شراء قوية")
         elif rsi > 70:
-            score_s += WEIGHT_RSI * 2.0
-            votes_s += 2
+            score_s += 2.0
             logs.append("📊 RSI في منطقة بيع قوية")
-        elif 40 < rsi < 60:
-            # RSI محايد - نبحث عن إشارات أخرى
-            logs.append("📊 RSI محايد")
         
-        # MACD
-        macd = indicators.get('macd', 0)
-        macd_signal = indicators.get('macd_signal', 0)
-        if macd > macd_signal and indicators.get('macd_hist', 0) > 0:
-            score_b += WEIGHT_MACD * 1.8
-            votes_b += 2
-            logs.append("📈 MACD صاعد قوي")
-        elif macd < macd_signal and indicators.get('macd_hist', 0) < 0:
-            score_s += WEIGHT_MACD * 1.8
-            votes_s += 2
-            logs.append("📉 MACD هابط قوي")
+        # 3. تحليل MACD
+        macd_hist = indicators.get('macd_hist', 0)
+        if macd_hist > 0:
+            score_b += 1.5
+            logs.append("📈 MACD صاعد")
+        elif macd_hist < 0:
+            score_s += 1.5
+            logs.append("📉 MACD هابط")
         
-        # ستوكاستك
-        stoch_k = indicators.get('stoch_k', 50)
-        stoch_d = indicators.get('stoch_d', 50)
-        if stoch_k < 20 and stoch_k > stoch_d:
-            score_b += WEIGHT_MOMENTUM * 1.5
-            votes_b += 1
-            logs.append("🎯 ستوكاستك في منطقة شراء")
-        elif stoch_k > 80 and stoch_k < stoch_d:
-            score_s += WEIGHT_MOMENTUM * 1.5
-            votes_s += 1
-            logs.append("🎯 ستوكاستك في منطقة بيع")
-        
-        # ===== 5. بولنجر باندز =====
-        bb_upper = indicators.get('bollinger_upper', current_price)
-        bb_lower = indicators.get('bollinger_lower', current_price)
-        
-        if current_price <= bb_lower:
-            score_b += WEIGHT_VOLATILITY * 1.8
-            votes_b += 2
-            logs.append("📏 سعر عند النطاق السفلي - شراء")
-        elif current_price >= bb_upper:
-            score_s += WEIGHT_VOLATILITY * 1.8
-            votes_s += 2
-            logs.append("📏 سعر عند النطاق العلوي - بيع")
-        
-        # ===== 6. ADX والاتجاه =====
+        # 4. تحليل ADX
         adx = indicators.get('adx', 0)
         plus_di = indicators.get('plus_di', 0)
         minus_di = indicators.get('minus_di', 0)
         
-        if adx > 25:  # ترند قوي
+        if adx > 25:
             if plus_di > minus_di:
-                score_b += WEIGHT_ADX * 2.5
-                votes_b += 3
+                score_b += 2.0
                 logs.append(f"🎯 ترند صاعد قوي (ADX: {adx:.1f})")
-                confidence_factors.append(1.8)
             else:
-                score_s += WEIGHT_ADX * 2.5
-                votes_s += 3
+                score_s += 2.0
                 logs.append(f"🎯 ترند هابط قوي (ADX: {adx:.1f})")
-                confidence_factors.append(1.8)
         
-        # ===== 7. المناطق الذهبية =====
-        if golden_zone and golden_zone.get('ok'):
-            gz_score = golden_zone.get('score', 0)
-            zone_type = golden_zone.get('zone', {}).get('type', '')
-            
-            if zone_type == 'golden_bottom' and gz_score >= 7.0:
-                score_b += WEIGHT_GOLDEN * 3.0
-                votes_b += 4
-                logs.append(f"🏆 منطقة ذهبية صاعدة (قوة: {gz_score:.1f})")
-                confidence_factors.append(2.0)
-            elif zone_type == 'golden_top' and gz_score >= 7.0:
-                score_s += WEIGHT_GOLDEN * 3.0
-                votes_s += 4
-                logs.append(f"🏆 منطقة ذهبية هابطة (قوة: {gz_score:.1f})")
-                confidence_factors.append(2.0)
+        # 5. تحليل بولنجر باندز
+        bb_lower = indicators.get('bollinger_lower', current_price)
+        bb_upper = indicators.get('bollinger_upper', current_price)
         
-        # ===== 8. تحليل الشموع =====
-        if candles.get('score_buy', 0) > 2.0:
-            score_b += WEIGHT_CANDLES * 1.8
-            votes_b += 2
-            logs.append(f"🕯️ تشكيل شموع شرائية قوية ({candles.get('pattern', '')})")
+        if current_price <= bb_lower * 1.01:
+            score_b += 1.8
+            logs.append("📏 سعر قرب النطاق السفلي - شراء")
+        elif current_price >= bb_upper * 0.99:
+            score_s += 1.8
+            logs.append("📏 سعر قرب النطاق العلوي - بيع")
         
-        if candles.get('score_sell', 0) > 2.0:
-            score_s += WEIGHT_CANDLES * 1.8
-            votes_s += 2
-            logs.append(f"🕯️ تشكيل شموع بيعية قوية ({candles.get('pattern', '')})")
-        
-        # ===== 9. تحليل التدفق =====
-        if flow_metrics.get('ok'):
-            delta_z = flow_metrics.get('delta_z', 0)
-            cvd_trend = flow_metrics.get('cvd_trend', '')
-            
-            if delta_z > 2.5 and cvd_trend == 'up':
-                score_b += WEIGHT_FLOW * 2.2
-                votes_b += 3
-                logs.append(f"🌊 تدفق شرائي قوي جداً (z: {delta_z:.2f})")
-                confidence_factors.append(1.7)
-            elif delta_z < -2.5 and cvd_trend == 'down':
-                score_s += WEIGHT_FLOW * 2.2
-                votes_s += 3
-                logs.append(f"🌊 تدفق بيعي قوي جداً (z: {delta_z:.2f})")
-                confidence_factors.append(1.7)
-        
-        # ===== 10. تحليل الكتاب =====
-        if orderbook.get('ok'):
-            imbalance = orderbook.get('imbalance', 1.0)
-            if imbalance > 2.0:
-                score_b += WEIGHT_SENTIMENT * 1.5
-                votes_b += 2
-                logs.append(f"📚 تضارب قوي لصالح المشترين (imb: {imbalance:.2f})")
-            elif imbalance < 0.5:
-                score_s += WEIGHT_SENTIMENT * 1.5
-                votes_s += 2
-                logs.append(f"📚 تضارب قوي لصالح البائعين (imb: {imbalance:.2f})")
-        
-        # ===== 11. تحليل الحجم =====
-        volume = indicators.get('volume', 0)
-        volume_ma = df['volume'].rolling(20).mean().iloc[-1] if len(df) >= 20 else volume
-        
-        if volume > volume_ma * 1.5:
-            # حجم عالي - نبحث عن اتجاه الحركة
-            if current_price > float(df['open'].iloc[-1]):
-                score_b += WEIGHT_VOLUME * 1.5
-                votes_b += 2
-                logs.append("📊 حجم عالي مع حركة صاعدة")
-            else:
-                score_s += WEIGHT_VOLUME * 1.5
-                votes_s += 2
-                logs.append("📊 حجم عالي مع حركة هابطة")
-        
-        # ===== 12. تطبيق عوامل الثقة =====
-        if confidence_factors:
-            confidence_multiplier = sum(confidence_factors) / len(confidence_factors)
-            score_b *= confidence_multiplier
-            score_s *= confidence_multiplier
-        
-        # ===== 13. مراعاة أداء التداول السابق =====
-        if trade_manager.consecutive_losses >= 2:
-            score_b *= 0.7
-            score_s *= 0.7
-            logs.append("⚠️ خسائر متتالية - تخفيض ثقة")
-        
-        if trade_manager.consecutive_wins >= 3:
-            score_b *= 1.2
-            score_s *= 1.2
-            logs.append("🎯 أرباح متتالية - زيادة ثقة")
-        
-        # ===== 14. حساب الثقة النهائية =====
+        # حساب الثقة
         total_score = score_b + score_s
-        max_possible_score = 35.0  # أقصى درجة ممكنة
-        
-        confidence = min(1.0, total_score / max_possible_score)
-        
-        # ===== 15. تطبيق الحد الأدنى للثقة =====
-        min_confidence = 0.65
-        if confidence < min_confidence:
-            score_b *= 0.5
-            score_s *= 0.5
-            logs.append(f"🛡️ ثقة منخفضة ({confidence:.2f} < {min_confidence}) - تخفيض")
+        confidence = min(1.0, total_score / 10.0)
         
         return {
-            "b": votes_b,
-            "s": votes_s,
             "score_b": round(score_b, 2),
             "score_s": round(score_s, 2),
             "confidence": round(confidence, 2),
-            "logs": logs,
+            "logs": logs[-5:],  # آخر 5 رسائل فقط
             "market_phase": market_phase,
             "volatility_regime": volatility_regime,
-            "support_resistance": support_resistance,
             "indicators": indicators
         }
         
     except Exception as e:
-        log_e(f"Ultra intelligent council error: {e}")
-        return {"b": 0, "s": 0, "score_b": 0.0, "score_s": 0.0, "confidence": 0.0, "logs": [f"Error: {e}"]}
+        log_w(f"Council AI error: {e}")
+        return {"score_b": 0.0, "score_s": 0.0, "confidence": 0.0, "logs": []}
 
-# =================== ENHANCED TRADE EXECUTION ===================
-def execute_intelligent_trade(side, price, qty, council_data, market_analysis):
-    """تنفيذ صفقة ذكية مع تحليل متقدم"""
+def execute_trade(side, price, qty):
+    """تنفيذ صفقة"""
     try:
-        if not EXECUTE_ORDERS or DRY_RUN:
+        if DRY_RUN:
             log_i(f"DRY_RUN: {side} {qty:.4f} @ {price:.6f}")
+            return True
+        
+        if not EXECUTE_ORDERS:
+            log_i(f"EXECUTION DISABLED: {side} {qty:.4f} @ {price:.6f}")
             return True
         
         if qty <= 0:
             log_e("❌ كمية غير صالحة للتنفيذ")
             return False
         
-        # تحضير البيانات للتنفيذ
-        confidence = council_data.get('confidence', 0)
-        market_phase = market_analysis.get('market_phase', 'neutral')
-        volatility_regime = market_analysis.get('volatility_regime', 'normal')
-        
-        log_i(f"🎯 EXECUTING INTELLIGENT TRADE:")
-        log_i(f"   SIDE: {side.upper()}")
-        log_i(f"   QTY: {qty:.4f}")
-        log_i(f"   PRICE: {price:.6f}")
-        log_i(f"   CONFIDENCE: {confidence:.2f}")
-        log_i(f"   MARKET PHASE: {market_phase}")
-        log_i(f"   VOLATILITY: {volatility_regime}")
+        log_i(f"🎯 EXECUTING TRADE: {side.upper()} {qty:.4f} @ {price:.6f}")
         
         if MODE_LIVE:
             exchange_set_leverage(ex, LEVERAGE, SYMBOL)
             params = exchange_specific_params(side, is_close=False)
             ex.create_order(SYMBOL, "market", side, qty, None, params)
         
-        log_g(f"✅ INTELLIGENT TRADE EXECUTED: {side.upper()} {qty:.4f} @ {price:.6f}")
+        log_g(f"✅ TRADE EXECUTED: {side.upper()} {qty:.4f} @ {price:.6f}")
         
-        # تسجيل الصفقة في المدير
+        # تسجيل الصفقة
         trade_manager.record_trade(
             side=side,
             entry=price,
-            exit_price=price,  # سيتم تحديثها عند الإغلاق
+            exit_price=price,
             quantity=qty,
-            profit=0.0,  # سيتم تحديثها عند الإغلاق
+            profit=0.0,
             duration=0
         )
         
         return True
         
     except Exception as e:
-        log_e(f"❌ INTELLIGENT TRADE EXECUTION FAILED: {e}")
+        log_e(f"❌ TRADE EXECUTION FAILED: {e}")
         return False
 
-def compute_adaptive_position_size(balance, price, confidence, market_phase):
-    """حساب حجم صفقة متكيف مع ظروف السوق"""
+def close_position(reason="manual_close"):
+    """إغلاق المركز الحالي"""
+    try:
+        if not STATE["open"] or STATE["qty"] <= 0:
+            return True
+            
+        side = STATE["side"]
+        qty = STATE["qty"]
+        close_side = "sell" if side == "long" else "buy"
+        
+        log_i(f"🔴 CLOSING POSITION: {side} {qty:.4f} - Reason: {reason}")
+        
+        if MODE_LIVE and EXECUTE_ORDERS and not DRY_RUN:
+            params = exchange_specific_params(close_side, is_close=True)
+            ex.create_order(SYMBOL, "market", close_side, qty, None, params)
+        
+        # تحديث الحالة
+        STATE["open"] = False
+        STATE["qty"] = 0.0
+        
+        # تسجيل الخروج في Anti-Reversal
+        anti_reversal.record_exit(side)
+        
+        log_g(f"✅ POSITION CLOSED: {side} {qty:.4f}")
+        return True
+        
+    except Exception as e:
+        log_e(f"❌ CLOSE POSITION FAILED: {e}")
+        return False
+
+def compute_position_size(balance, price, confidence):
+    """حساب حجم الصفقة"""
     base_size = trade_manager.get_optimal_position_size(balance)
     
     # تعديل الحجم بناءً على الثقة
-    confidence_multiplier = 0.5 + (confidence * 0.5)  # 0.5 إلى 1.0
+    confidence_multiplier = 0.5 + (confidence * 0.5)
     
     # تعديل الحجم بناءً على مرحلة السوق
+    market_phase = STATE.get("market_phase", "neutral")
     if market_phase in ["strong_bull", "strong_bear"]:
         market_multiplier = 1.3
     elif market_phase in ["bull", "bear"]:
@@ -1592,28 +771,19 @@ def compute_adaptive_position_size(balance, price, confidence, market_phase):
     adaptive_size = base_size * confidence_multiplier * market_multiplier
     
     # التأكد من أن الحجم ضمن الحدود المعقولة
-    max_position = balance * LEVERAGE * 0.8  # 80% من الرصيد بالرافعة
+    max_position = balance * LEVERAGE * 0.8
     final_size = min(adaptive_size, max_position / price) if price > 0 else adaptive_size
-    
-    log_i(f"📊 ADAPTIVE POSITION SIZING:")
-    log_i(f"   Base: {base_size:.4f}")
-    log_i(f"   Confidence Multiplier: {confidence_multiplier:.2f}")
-    log_i(f"   Market Multiplier: {market_multiplier:.2f}")
-    log_i(f"   Final: {final_size:.4f}")
     
     return safe_qty(final_size)
 
-# =================== ENHANCED TRADE MANAGEMENT ===================
-def manage_intelligent_position(df, indicators, price_info):
-    """إدارة ذكية للمراكب المفتوحة"""
+def manage_position(df, current_price):
+    """إدارة المركز المفتوح"""
     if not STATE["open"] or STATE["qty"] <= 0:
         return
     
     try:
-        current_price = price_info.get("price", 0)
         entry_price = STATE["entry"]
         side = STATE["side"]
-        qty = STATE["qty"]
         
         # حساب الربح/الخسارة
         if side == "long":
@@ -1623,159 +793,63 @@ def manage_intelligent_position(df, indicators, price_info):
         
         STATE["pnl"] = pnl_pct
         
-        if pnl_pct > STATE["highest_profit_pct"]:
-            STATE["highest_profit_pct"] = pnl_pct
-        
-        # تحليل السوق الحالي
-        market_phase = market_analyzer.detect_market_phase(df)
-        volatility_regime, volatility_ratio = market_analyzer.analyze_volatility_regime(df)
-        
-        # إستراتيجية الخروج الذكية
-        exit_decision = intelligent_exit_decision(
-            pnl_pct, side, indicators, market_phase, volatility_regime
-        )
-        
-        if exit_decision["action"] == "close":
-            log_i(f"🔴 INTELLIGENT EXIT: {exit_decision['reason']}")
-            close_market_strict(exit_decision['reason'])
-        elif exit_decision["action"] == "partial":
-            close_qty = safe_qty(qty * exit_decision["qty_pct"])
-            if close_qty > 0:
-                close_side = "sell" if side == "long" else "buy"
-                if MODE_LIVE and EXECUTE_ORDERS and not DRY_RUN:
-                    try:
-                        params = exchange_specific_params(close_side, is_close=True)
-                        ex.create_order(SYMBOL, "market", close_side, close_qty, None, params)
-                        log_g(f"🎯 PARTIAL CLOSE: {exit_decision['reason']} - {close_qty:.4f} units")
-                        STATE["qty"] = safe_qty(qty - close_qty)
-                    except Exception as e:
-                        log_e(f"❌ PARTIAL CLOSE FAILED: {e}")
-        
-        # تحديث الوقف المتحرك الذكي
-        update_intelligent_trailing_stop(current_price, side, indicators, market_phase)
-        
-    except Exception as e:
-        log_e(f"❌ INTELLIGENT POSITION MANAGEMENT ERROR: {e}")
-
-def intelligent_exit_decision(pnl_pct, side, indicators, market_phase, volatility_regime):
-    """قرار خروج ذكي بناءً على متعددة معايير"""
-    try:
+        # إستراتيجية الخروج المبسطة
+        indicators = compute_advanced_indicators(df)
         rsi = indicators.get('rsi', 50)
-        adx = indicators.get('adx', 0)
-        macd_hist = indicators.get('macd_hist', 0)
         
-        # إستراتيجية الخروج بناءً على مرحلة السوق
-        if market_phase in ["strong_bull", "strong_bear"]:
-            # في الترند القوي، نبقى لفترة أطول
-            tp_targets = [1.0, 2.0, 3.5, 5.0, 7.0, 10.0]
-        else:
-            # في السوق الجانبي، نخرج مبكراً
-            tp_targets = [0.8, 1.5, 2.5, 4.0, 6.0]
+        # خروج عند تحقيق هدف الربح
+        if pnl_pct >= 2.0:
+            log_i(f"🎯 TARGET REACHED: {pnl_pct:.2f}% - Closing position")
+            close_position(f"target_reached_{pnl_pct:.1f}%")
+            return
         
-        # تحقيق أهداف الربح
-        for i, target in enumerate(tp_targets):
-            tp_key = f"tp_{i+1}_done"
-            if not STATE.get(tp_key, False) and pnl_pct >= target:
-                close_pct = 0.2 if i < 3 else 0.15  # 20% للأهداف الأولى، 15% للبقية
-                return {
-                    "action": "partial",
-                    "qty_pct": close_pct,
-                    "reason": f"TP{i+1} achieved: {target:.1f}%"
-                }
+        # خروج عند فقدان الزخم
+        if side == "long" and rsi > 80:
+            log_i(f"⚠️ OVERBOUGHT: RSI={rsi:.1f} - Closing long position")
+            close_position(f"overbought_rsi_{rsi:.1f}")
+            return
         
-        # إشارات انعكاس قوية
-        reversal_signals = 0
-        if (side == "long" and rsi > 80 and macd_hist < 0) or (side == "short" and rsi < 20 and macd_hist > 0):
-            reversal_signals += 1
+        if side == "short" and rsi < 20:
+            log_i(f"⚠️ OVERSOLD: RSI={rsi:.1f} - Closing short position")
+            close_position(f"oversold_rsi_{rsi:.1f}")
+            return
         
-        if adx < 20 and abs(pnl_pct) > 2.0:  # فقدان الزخم مع ربح جيد
-            reversal_signals += 1
-        
-        if reversal_signals >= 2:
-            return {
-                "action": "close",
-                "reason": "Strong reversal signals"
-            }
-        
-        # خروج وقائي في التقلب العالي مع أرباح جيدة
-        if volatility_regime == "high" and pnl_pct > 3.0:
-            return {
-                "action": "close",
-                "reason": "High volatility with good profit - secure gains"
-            }
-        
-        return {"action": "hold", "reason": "Continue riding trend"}
-        
-    except Exception as e:
-        log_w(f"Intelligent exit decision error: {e}")
-        return {"action": "hold", "reason": "Error in decision"}
-
-def update_intelligent_trailing_stop(current_price, side, indicators, market_phase):
-    """تحديث وقف الخسارة المتحرك الذكي"""
-    try:
-        atr = indicators.get('atr', 0)
-        pnl_pct = STATE.get("pnl", 0)
-        
-        # تحديد مضاعف ATR بناءً على مرحلة السوق والتقلب
-        if market_phase in ["strong_bull", "strong_bear"]:
-            base_multiplier = 2.0
-        else:
-            base_multiplier = 1.5
-        
-        # تعديل المضاعف بناءً على مستوى الربح
-        if pnl_pct > 5.0:
-            trail_mult = base_multiplier * 0.7  # وقف أضيق عند الأرباح العالية
-        elif pnl_pct > 2.0:
-            trail_mult = base_multiplier * 0.8
-        else:
-            trail_mult = base_multiplier
-        
-        if not STATE.get("trail_active", False) and pnl_pct >= 1.0:
-            STATE["trail_active"] = True
-            STATE["breakeven_armed"] = True
-            STATE["breakeven"] = STATE["entry"]
-            log_i("🔄 Intelligent trailing stop activated")
-        
-        if STATE.get("trail_active"):
-            if side == "long":
-                new_trail = current_price - (atr * trail_mult)
-                if STATE.get("trail") is None or new_trail > STATE["trail"]:
-                    STATE["trail"] = new_trail
-                    if STATE["trail"] > STATE.get("entry", 0):
-                        log_i(f"🔼 Intelligent trail updated: {STATE['trail']:.6f}")
-            else:
-                new_trail = current_price + (atr * trail_mult)
-                if STATE.get("trail") is None or new_trail < STATE["trail"]:
-                    STATE["trail"] = new_trail
-                    if STATE["trail"] < STATE.get("entry", float('inf')):
-                        log_i(f"🔽 Intelligent trail updated: {STATE['trail']:.6f}")
-        
-        # تفعيل وقف الخسارة عند نقطة التعادل بعد تحقيق ربح معين
-        if STATE.get("breakeven_armed") and not STATE.get("breakeven_active") and pnl_pct >= 1.5:
-            STATE["breakeven_active"] = True
-            STATE["trail"] = STATE["entry"]  # وقف عند نقطة الدخول
-            log_i("🎯 Breakeven activated - risk free trade")
+        # خروج وقائي بعد وقت طويل
+        entry_time = STATE.get("entry_time", 0)
+        time_in_trade = time.time() - entry_time
+        if time_in_trade > 3600:  # ساعة واحدة
+            log_i(f"⏰ TIME EXIT: In trade for {int(time_in_trade/60)}min")
+            close_position("time_exit_1h")
+            return
             
     except Exception as e:
-        log_w(f"Intelligent trailing stop error: {e}")
+        log_w(f"Manage position error: {e}")
 
-# =================== ENHANCED TRADING LOOP ===================
-def enhanced_trading_loop():
-    """الحلقة الرئيسية المحسنة مع جميع المكونات الجديدة"""
-    log_banner("STARTING ENHANCED ULTRA INTELLIGENT TRADING BOT v9.0")
+# =================== MAIN TRADING LOOP ===================
+def main_trading_loop():
+    """الحلقة الرئيسية للتداول"""
+    log_banner("STARTING SIMPLIFIED SUI TRADING BOT v9.1")
     log_i(f"🤖 Bot Version: {BOT_VERSION}")
     log_i(f"💱 Exchange: {EXCHANGE_NAME.upper()}")
     log_i(f"📈 Symbol: {SYMBOL}")
     log_i(f"⏰ Interval: {INTERVAL}")
     log_i(f"🎯 Leverage: {LEVERAGE}x")
-    log_i(f"📊 Risk Allocation: {RISK_ALLOC*100}%")
+    
+    # تحميل مواصفات السوق
+    load_market_specs()
+    
+    # تهيئة المكونات
+    global market_analyzer, trade_manager, liquidity_engine, anti_reversal
+    market_analyzer = AdvancedMarketAnalyzer()
+    trade_manager = SmartTradeManager()
+    liquidity_engine = LiquidityEngine()
+    anti_reversal = AntiReversalGuard()
     
     while True:
         try:
-            # 1. جمع البيانات
-            df = fetch_ohlcv(limit=200)
+            # جمع البيانات
+            df = fetch_ohlcv(limit=100)
             current_price = price_now()
-            orderbook = bookmap_snapshot(ex, SYMBOL)
             
             if df.empty or current_price is None:
                 log_w("📭 No data available - retrying...")
@@ -1784,124 +858,58 @@ def enhanced_trading_loop():
             
             STATE["current_price"] = current_price
             
-            # 2. تحليل السوق المتقدم
-            market_phase = market_analyzer.detect_market_phase(df)
-            support_resistance = market_analyzer.calculate_support_resistance(df)
-            volatility_regime, volatility_ratio = market_analyzer.analyze_volatility_regime(df)
+            # إدارة المركز المفتوح
+            manage_position(df, current_price)
             
-            # 3. قرار مجلس الإدارة الذكي
-            council_data = ultra_intelligent_council_ai(df)
-            
-            # 4. تحديث الحالة
-            STATE["last_council"] = council_data
-            STATE["last_ind"] = council_data.get("indicators", {})
-            STATE["last_spread_bps"] = orderbook_spread_bps()
-            STATE["market_phase"] = market_phase
-            STATE["volatility_regime"] = volatility_regime
-            
-            # 5. عرض معلومات السوق
-            if LOG_ADDONS:
-                log_i(f"🏪 MARKET: {market_phase.upper()} | VOLATILITY: {volatility_regime} ({volatility_ratio:.2f})")
-                log_i(f"🎯 COUNCIL: B{council_data['b']}/S{council_data['s']} | "
-                      f"Score: {council_data['score_b']:.1f}/{council_data['score_s']:.1f} | "
-                      f"Confidence: {council_data['confidence']:.2f}")
-                
-                for log_msg in council_data.get("logs", [])[-5:]:
-                    log_i(f"   {log_msg}")
-            
-            # 6. إدارة المركز المفتوح
-            if STATE["open"]:
-                manage_intelligent_position(df, council_data.get("indicators", {}), {
-                    "price": current_price,
-                    "market_phase": market_phase,
-                    "volatility_regime": volatility_regime
-                })
-            
-            # 7. فتح صفقات جديدة
+            # فتح صفقات جديدة فقط إذا لم يكن هناك مركز مفتوح
             if not STATE["open"]:
+                # قرار مجلس الذكاء الاصطناعي
+                council_data = simplified_council_ai(df)
+                
+                # تحديث الحالة
+                STATE["last_council"] = council_data
+                STATE["market_phase"] = council_data.get("market_phase", "neutral")
+                STATE["volatility_regime"] = council_data.get("volatility_regime", "normal")
+                
+                # عرض معلومات السوق
+                if LOG_ADDONS:
+                    log_i(f"🏪 MARKET: {STATE['market_phase'].upper()} | VOLATILITY: {STATE['volatility_regime']}")
+                    log_i(f"🎯 COUNCIL: Score B={council_data['score_b']:.1f} | S={council_data['score_s']:.1f} | Conf={council_data['confidence']:.2f}")
+                    
+                    for log_msg in council_data.get("logs", []):
+                        log_i(f"   {log_msg}")
+                
                 # تحديد اتجاه التداول
                 signal_side = None
-                signal_reason = ""
-                
-                if council_data["score_b"] > council_data["score_s"] and council_data["score_b"] >= 12.0:
+                if council_data["score_b"] > council_data["score_s"] and council_data["score_b"] >= 8.0:
                     signal_side = "buy"
-                    signal_reason = f"Strong buy signal (score: {council_data['score_b']:.1f})"
-                elif council_data["score_s"] > council_data["score_b"] and council_data["score_s"] >= 12.0:
+                elif council_data["score_s"] > council_data["score_b"] and council_data["score_s"] >= 8.0:
                     signal_side = "sell"
-                    signal_reason = f"Strong sell signal (score: {council_data['score_s']:.1f})"
                 
                 # فتح الصفقة إذا كان هناك إشارة قوية
-                if signal_side and council_data["confidence"] >= 0.7:
-                    
-                    # 7.1 التحقق من Anti-Reversal
+                if signal_side and council_data["confidence"] >= 0.6:
+                    # التحقق من Anti-Reversal
                     can_enter, reason = anti_reversal.can_enter(signal_side)
                     if not can_enter:
                         log_i(f"⛔ Anti-Reversal: {reason}")
                         time.sleep(BASE_SLEEP)
                         continue
                     
-                    # 7.2 التحقق من السيولة
-                    liquidity_ok = liquidity_engine.validate_entry(df, orderbook, signal_side)
-                    if not liquidity_ok:
-                        log_i("⛔ Liquidity: شروط السيولة غير مستوفاة")
+                    # التحقق من السيولة
+                    if not liquidity_engine.detect_liquidity_sweep(df, signal_side):
+                        log_i("⛔ Liquidity: لم يتم اكتشاف مسح سيولة حقيقي")
                         time.sleep(BASE_SLEEP)
                         continue
                     
-                    # 7.3 تأكيد متعدد الأطر الزمنية
-                    confirmations = 0
-                    if MIN_CONFIRMATIONS > 1:
-                        log_i(f"🔍 Multi-timeframe confirmation ({MIN_CONFIRMATIONS} required)")
-                        # تحقق من أطر زمنية إضافية
-                        for tf in CONFIRMATION_TIMEFRAMES:
-                            if tf != INTERVAL:
-                                # في الواقع، تحتاج لجلب بيانات للإطار الزمني tf
-                                # هنا نموذج مبسط
-                                tf_df = fetch_ohlcv(limit=50)  # نفس الإطار للتبسيط
-                                tf_council = ultra_intelligent_council_ai(tf_df)
-                                if signal_side == "buy" and tf_council['score_b'] > tf_council['score_s']:
-                                    confirmations += 1
-                                elif signal_side == "sell" and tf_council['score_s'] > tf_council['score_b']:
-                                    confirmations += 1
-                        
-                        if confirmations < MIN_CONFIRMATIONS - 1:  # -1 لأننا نحسب الإطار الحالي
-                            log_i(f"⛔ Confirmations: غير كافية ({confirmations}/{MIN_CONFIRMATIONS-1})")
-                            time.sleep(BASE_SLEEP)
-                            continue
-                    
-                    # 7.4 حساب حجم الصفقة المتكيف
+                    # حساب حجم الصفقة
                     balance = balance_usdt()
-                    position_size = compute_adaptive_position_size(
-                        balance, current_price, council_data["confidence"], market_phase
-                    )
+                    position_size = compute_position_size(balance, current_price, council_data["confidence"])
                     
                     if position_size > 0:
-                        # 7.5 إعداد تحليل الدخول
-                        analysis = {
-                            "liquidity_status": "SWEEP_CONFIRMED" if liquidity_ok else "WEAK",
-                            "zone_type": "DEMAND_VALIDATED" if signal_side == "buy" else "SUPPLY_VALIDATED",
-                            "structure": "BULLISH" if signal_side == "buy" else "BEARISH",
-                            "tp_plan": f"TP1@{current_price * (1.02 if signal_side == 'buy' else 0.98):.4f}",
-                            "stop_level": f"BEHIND_LIQUIDITY",
-                            "market_phase": market_phase,
-                            "volatility": volatility_regime
-                        }
+                        log_i(f"🎯 TRADE SIGNAL: {signal_side.upper()} | Size: {position_size:.4f} | Price: {current_price:.6f}")
                         
-                        # 7.6 تسجيل الدخول المحترف
-                        pro_logger.log_intelligent_entry(
-                            signal_side, 
-                            council_data['score_b'] if signal_side == 'buy' else council_data['score_s'],
-                            INTERVAL, 
-                            analysis
-                        )
-                        
-                        # 7.7 تنفيذ الصفقة
-                        success = execute_intelligent_trade(
-                            signal_side, current_price, position_size, council_data, {
-                                "market_phase": market_phase,
-                                "volatility_regime": volatility_regime,
-                                "support_resistance": support_resistance
-                            }
-                        )
+                        # تنفيذ الصفقة
+                        success = execute_trade(signal_side, current_price, position_size)
                         
                         if success:
                             STATE.update({
@@ -1911,12 +919,6 @@ def enhanced_trading_loop():
                                 "last_entry_price": current_price,
                                 "qty": position_size,
                                 "pnl": 0.0,
-                                "bars": 0,
-                                "trail": None,
-                                "breakeven": None,
-                                "highest_profit_pct": 0.0,
-                                "profit_targets_achieved": 0,
-                                "mode": "intelligent_trend",
                                 "entry_time": time.time(),
                                 "minimum_hold_until": time.time() + MIN_HOLD_TIME
                             })
@@ -1924,50 +926,15 @@ def enhanced_trading_loop():
                             # تسجيل الدخول في Anti-Reversal
                             anti_reversal.record_entry(signal_side)
                             
-                            # حفظ الحالة
-                            save_state({
-                                "in_position": True,
-                                "side": signal_side.upper(),
-                                "entry_price": current_price,
-                                "position_qty": position_size,
-                                "opened_at": int(time.time())
-                            })
-                            
-                            print_position_snapshot("ENHANCED_OPEN")
+                            log_i(f"✅ POSITION OPENED: {signal_side.upper()} {position_size:.4f} @ {current_price:.6f}")
             
-            # 8. التحقق من تحقيق الهدف اليومي
-            if trade_manager.daily_profit >= PROFIT_TARGET_DAILY:
-                log_g(f"🎉 DAILY PROFIT TARGET ACHIEVED: {trade_manager.daily_profit:.2f} USDT")
-                if STATE["open"]:
-                    log_i("🔒 Locking profits - closing all positions")
-                    close_market_strict("daily_target_achieved")
-                    anti_reversal.record_exit(STATE["side"])
-            
-            # 9. الانتظار للدورة التالية
-            sleep_time = NEAR_CLOSE_S if time_to_candle_close(df) <= 10 else BASE_SLEEP
-            time.sleep(sleep_time)
+            # الانتظار للدورة التالية
+            time.sleep(BASE_SLEEP)
             
         except Exception as e:
-            log_e(f"❌ ENHANCED TRADING LOOP ERROR: {e}")
+            log_e(f"❌ TRADING LOOP ERROR: {e}")
             log_e(traceback.format_exc())
             time.sleep(BASE_SLEEP * 2)
-
-# =================== STATE INITIALIZATION ===================
-STATE = {
-    "open": False, "side": None, "entry": None, "qty": 0.0,
-    "pnl": 0.0, "bars": 0, "trail": None, "breakeven": None,
-    "tp1_done": False, "highest_profit_pct": 0.0,
-    "profit_targets_achieved": 0,
-    "last_entry_price": None,
-    "current_price": 0.0,
-    "market_phase": "neutral",
-    "volatility_regime": "normal",
-    "entry_time": 0,
-    "minimum_hold_until": 0
-}
-
-compound_pnl = 0.0
-wait_for_next_signal_side = None
 
 # =================== FLASK API ===================
 app = Flask(__name__)
@@ -1976,18 +943,27 @@ app = Flask(__name__)
 def home():
     return f"""
     <html>
-        <head><title>SUI ULTRA PRO AI BOT v9.0</title></head>
-        <body>
-            <h1>🚀 SUI ULTRA PRO AI BOT v9.0 - النسخة المحسنة</h1>
-            <p><strong>Version:</strong> {BOT_VERSION}</p>
-            <p><strong>Exchange:</strong> {EXCHANGE_NAME.upper()}</p>
-            <p><strong>Symbol:</strong> {SYMBOL}</p>
-            <p><strong>Status:</strong> {'🟢 LIVE' if MODE_LIVE else '🟡 PAPER'}</p>
-            <p><strong>Daily PnL:</strong> {trade_manager.daily_profit:.2f} USDT</p>
-            <p><strong>Win Rate:</strong> {trade_manager.win_rate:.1f}%</p>
-            <p><strong>Consecutive Wins:</strong> {trade_manager.consecutive_wins}</p>
-            <p><strong>Consecutive Losses:</strong> {trade_manager.consecutive_losses}</p>
-            <p><a href="/health">Health Check</a> | <a href="/metrics">Metrics</a> | <a href="/performance">Performance</a> | <a href="/protection">Protection Status</a></p>
+        <head><title>SUI ULTRA PRO AI BOT v9.1</title></head>
+        <body style="font-family: Arial, sans-serif; padding: 20px; background-color: #f0f0f0;">
+            <div style="max-width: 800px; margin: 0 auto; background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                <h1 style="color: #333; border-bottom: 2px solid #4CAF50; padding-bottom: 10px;">🚀 SUI ULTRA PRO AI BOT v9.1</h1>
+                <div style="margin-top: 20px;">
+                    <p><strong>Version:</strong> {BOT_VERSION}</p>
+                    <p><strong>Exchange:</strong> {EXCHANGE_NAME.upper()}</p>
+                    <p><strong>Symbol:</strong> {SYMBOL}</p>
+                    <p><strong>Status:</strong> <span style="color: {'green' if MODE_LIVE else 'orange'}">{'🟢 LIVE' if MODE_LIVE else '🟡 PAPER'}</span></p>
+                    <p><strong>Daily PnL:</strong> <span style="color: {'green' if trade_manager.daily_profit >= 0 else 'red'}">{trade_manager.daily_profit:.2f} USDT</span></p>
+                    <p><strong>Win Rate:</strong> {trade_manager.win_rate:.1f}%</p>
+                    <p><strong>Open Position:</strong> {'🟢 YES' if STATE['open'] else '🔴 NO'} {STATE['side'] if STATE['open'] else ''}</p>
+                    <div style="margin-top: 30px; padding: 15px; background-color: #f9f9f9; border-radius: 5px;">
+                        <p><strong>Quick Links:</strong></p>
+                        <p><a href="/health" style="color: #4CAF50; text-decoration: none;">🩺 Health Check</a></p>
+                        <p><a href="/metrics" style="color: #4CAF50; text-decoration: none;">📊 Metrics</a></p>
+                        <p><a href="/performance" style="color: #4CAF50; text-decoration: none;">📈 Performance</a></p>
+                        <p><a href="/close" style="color: #ff4444; text-decoration: none;">🔴 Close Position</a></p>
+                    </div>
+                </div>
+            </div>
         </body>
     </html>
     """
@@ -2018,19 +994,12 @@ def metrics():
         "consecutive_wins": trade_manager.consecutive_wins,
         "consecutive_losses": trade_manager.consecutive_losses,
         "total_trades": len(trade_manager.trade_history),
-        "position": STATE,
-        "performance_suggestions": trade_manager.get_trade_suggestions(),
-        "protection_status": {
-            "cooldown_active": anti_reversal.last_exit_time is not None,
-            "cooldown_remaining": max(0, COOLDOWN_AFTER_EXIT - (time.time() - anti_reversal.last_exit_time)) if anti_reversal.last_exit_time else 0,
-            "min_hold_time": MIN_HOLD_TIME,
-            "dead_zone_pct": DEAD_ZONE_PCT
-        }
+        "position": STATE
     })
 
 @app.route("/performance")
 def performance():
-    recent_trades = trade_manager.trade_history[-10:]  # آخر 10 صفقات
+    recent_trades = trade_manager.trade_history[-10:]
     return jsonify({
         "daily_profit": trade_manager.daily_profit,
         "win_rate": trade_manager.win_rate,
@@ -2043,55 +1012,42 @@ def performance():
                 "profit": t['profit'],
                 "profit_pct": t['profit_pct']
             } for t in recent_trades
-        ],
-        "performance_report": pro_logger.generate_performance_report()
+        ]
     })
 
-@app.route("/protection")
-def protection_status():
-    current_time = time.time()
-    cooldown_remaining = 0
-    if anti_reversal.last_exit_time:
-        cooldown_remaining = max(0, COOLDOWN_AFTER_EXIT - (current_time - anti_reversal.last_exit_time))
-    
-    hold_time_remaining = 0
-    if STATE.get("entry_time"):
-        hold_time_remaining = max(0, MIN_HOLD_TIME - (current_time - STATE["entry_time"]))
-    
+@app.route("/close")
+def close_position_route():
+    """إغلاق المركز عبر API"""
+    success = close_position("api_request")
     return jsonify({
-        "anti_reversal": {
-            "last_exit_side": anti_reversal.last_exit_side,
-            "last_exit_time": anti_reversal.last_exit_time,
-            "cooldown_period": COOLDOWN_AFTER_EXIT,
-            "cooldown_remaining": cooldown_remaining,
-            "min_hold_time": MIN_HOLD_TIME,
-            "hold_time_remaining": hold_time_remaining
-        },
-        "liquidity_engine": {
-            "active": True,
-            "dead_zone_pct": DEAD_ZONE_PCT,
-            "min_confirmations": MIN_CONFIRMATIONS
-        }
+        "success": success,
+        "message": "Position closed" if success else "Failed to close position",
+        "timestamp": datetime.now().isoformat()
     })
-
-@app.get("/mark/<color>")
-def mark_position(color):
-    color = color.lower()
-    if color not in ["green", "red"]:
-        return jsonify({"ok": False, "error": "Use /mark/green or /mark/red"}), 400
-    
-    print_position_snapshot(reason="MANUAL_MARK", color=color)
-    return jsonify({"ok": True, "marked": color, "timestamp": datetime.now().isoformat()})
 
 # =================== STARTUP ===================
-def startup_sequence():
-    """تسلسل بدء التشغيل"""
-    log_banner("SYSTEM INITIALIZATION v9.0")
+def setup_logging():
+    """إعداد التسجيل"""
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
     
-    # تحميل الحالة السابقة
-    loaded_state = load_state()
-    if loaded_state:
-        log_g("✅ Previous state loaded successfully")
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+    
+    ch = logging.StreamHandler()
+    ch.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
+    logger.addHandler(ch)
+    
+    logging.getLogger('werkzeug').setLevel(logging.ERROR)
+    
+    log_i("🔄 Logging setup complete")
+
+def startup():
+    """بدء التشغيل"""
+    log_banner("SYSTEM INITIALIZATION v9.1")
+    
+    # إعداد التسجيل
+    setup_logging()
     
     # التحقق من اتصال البورصة
     try:
@@ -2116,9 +1072,8 @@ def startup_sequence():
     log_i(f"   Cooldown after exit: {COOLDOWN_AFTER_EXIT}s")
     log_i(f"   Minimum hold time: {MIN_HOLD_TIME}s")
     log_i(f"   Dead zone: {DEAD_ZONE_PCT}%")
-    log_i(f"   Confirmations required: {MIN_CONFIRMATIONS}")
     
-    log_g("🚀 ENHANCED ULTRA INTELLIGENT TRADING BOT READY!")
+    log_g("🚀 SIMPLIFIED TRADING BOT READY!")
     return True
 
 # =================== MAIN EXECUTION ===================
@@ -2126,29 +1081,19 @@ if __name__ == "__main__":
     # إعداد معالجات الإشارات
     def signal_handler(signum, frame):
         log_i(f"🛑 Received signal {signum} - Shutting down gracefully...")
-        save_state(STATE)
         sys.exit(0)
     
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
     # بدء التشغيل
-    if startup_sequence():
+    if startup():
         # بدء خيوط التنفيذ
         import threading
         
         # خيط التداول الرئيسي
-        trading_thread = threading.Thread(target=enhanced_trading_loop, daemon=True)
+        trading_thread = threading.Thread(target=main_trading_loop, daemon=True)
         trading_thread.start()
-        
-        # خيط الحفاظ على الحالة
-        def state_saver():
-            while True:
-                time.sleep(300)  # حفظ كل 5 دقائق
-                save_state(STATE)
-        
-        state_thread = threading.Thread(target=state_saver, daemon=True)
-        state_thread.start()
         
         log_g(f"🌐 Starting web server on port {PORT}")
         
