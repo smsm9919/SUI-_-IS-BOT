@@ -498,7 +498,7 @@ class TrendClassifierEngine:
         # التصنيف النهائي
         score = 0
         
-        # 🔥 LARGE TREND شروط قاسية
+        # LARGE TREND شروط قاسية
         large_trend_conditions = (
             adx_strength > 30 and
             di_spread > 15 and
@@ -507,7 +507,7 @@ class TrendClassifierEngine:
             trend_consistency > 0.7
         )
         
-        # ⚡ MID TREND شروط متوسطة
+        # MID TREND شروط متوسطة
         mid_trend_conditions = (
             adx_strength > 20 and
             di_spread > 8 and
@@ -759,7 +759,7 @@ class DecisionMatrixEngine:
         
         # 4. فلتر التوقيت
         current_hour = datetime.utcnow().hour
-        if current_hour in [0, 1, 2, 3]:  *سوق هادئ*
+        if current_hour in [0, 1, 2, 3]:  # سوق هادئ
             return False, "LOW_LIQUIDITY_HOURS"
         
         return True, "ALL_FILTERS_PASSED"
@@ -790,7 +790,7 @@ class DecisionMatrixEngine:
             score_b = council_signal.get("score_b", 0)
             score_s = council_signal.get("score_s", 0)
             
-            if score_b > score_s * 1.2:  *تفوق واضح*
+            if score_b > score_s * 1.2:  # تفوق واضح
                 votes["BUY"] += 2
                 votes["CONFIDENCE_BUY"] += min(0.8, score_b / 50)
                 votes["REASONS"].append(f"COUNCIL_BUY: {score_b:.1f}")
@@ -950,11 +950,12 @@ def integrate_smart_money_analysis(df: pd.DataFrame, ind: Dict, council_data: Di
         final_decision = decision_matrix.evaluate(signals, STATE.get("open", False))
         
         # إضافة معلومات Smart Money إلى اللوج
-        if sm_decision.allow_entry:
+        if sm_decision and sm_decision.allow_entry:
             log_i(f"🧠 SMART MONEY → {sm_decision.side} | Confidence: {sm_decision.confidence:.2f} | Type: {sm_decision.trade_type}")
             log_i(f"   Reason: {sm_decision.reason}")
         
-        log_i(f"📊 TREND CLASSIFIER → {trend_info.get('type', 'UNKNOWN')} | Strength: {trend_info.get('strength', 0):.1f}")
+        if trend_info:
+            log_i(f"📊 TREND CLASSIFIER → {trend_info.get('type', 'UNKNOWN')} | Strength: {trend_info.get('strength', 0):.1f}")
         
         return {
             "final_decision": final_decision,
@@ -995,9 +996,9 @@ def execute_smart_money_trade(decision: Dict, price: float, balance: float) -> b
     
     # تعديل إضافي بناءً على نوع الترند
     if trade_type == "LARGE_TREND":
-        qty *= 1.3  *زيادة الحجم في الترند الكبير*
+        qty *= 1.3  # زيادة الحجم في الترند الكبير
     elif trade_type == "SCALP":
-        qty *= 0.7  *تقليل الحجم في السكالب*
+        qty *= 0.7  # تقليل الحجم في السكالب
     
     qty = safe_qty(qty)
     
@@ -1185,12 +1186,10 @@ def trade_loop_with_smart_money():
 trade_loop = trade_loop_with_smart_money
 
 # ============================================
-#  REST OF THE ORIGINAL CODE REMAINS THE SAME
+#  REST OF THE ORIGINAL CODE
 # ============================================
 
-# [يتبع باقي الكود الأصلي بدون تغيير...]
-# جميع الدوال والمتغيرات الأصلية تبقى كما هي
-# فقط تمت إضافة الأنظمة الذكية الجديدة
+# ... [يتبع باقي الكود الأصلي بدون تغيير] ...
 
 # =================== INITIALIZATION ===================
 EXCHANGE_NAME = os.getenv("EXCHANGE", "bingx").lower()
@@ -1247,7 +1246,404 @@ def log_smart_money(msg):
     print(f"🧠 {msg}", flush=True)
     logging.info(f"SMART_MONEY: {msg}")
 
-# ... [rest of the original code remains exactly the same] ...
+# =================== EXCHANGE FACTORY ===================
+def make_ex():
+    exchange_config = {
+        "apiKey": API_KEY,
+        "secret": API_SECRET,
+        "enableRateLimit": True,
+        "timeout": 20000,
+    }
+    
+    if EXCHANGE_NAME == "bybit":
+        exchange_config["options"] = {"defaultType": "swap"}
+        return ccxt.bybit(exchange_config)
+    else:
+        exchange_config["options"] = {"defaultType": "swap"}
+        return ccxt.bingx(exchange_config)
+
+ex = make_ex()
+
+# ============================================
+#  ORIGINAL HELPER FUNCTIONS (NEEDED FOR INTEGRATION)
+# ============================================
+
+# هذه الدوال مطلوبة للتكامل مع الأنظمة الجديدة
+def safe_get(ind: dict, key: str, default=0.0):
+    """قراءة آمنة للقيم من المؤشرات"""
+    if ind is None: 
+        return float(default)
+    val = ind.get(key, default)
+    try:
+        if isinstance(val, (pd.Series, list, np.ndarray)):
+            return float(val[-1])
+        return float(val)
+    except:
+        return float(default)
+
+def compute_size(balance, price):
+    """حساب حجم الصفقة"""
+    effective_balance = float(balance or 0.0)
+    px = float(price or 0.0)
+
+    if effective_balance <= 0 or px <= 0:
+        return 0.0
+
+    capital_usdt = effective_balance * 0.60
+    notional_usdt = capital_usdt * 10.0
+    raw_qty = notional_usdt / px
+
+    return safe_qty(raw_qty)
+
+def safe_qty(q):
+    """تقريب آمن للكمية"""
+    try:
+        return float(q)
+    except:
+        return 0.0
+
+def price_now():
+    """الحصول على السعر الحالي"""
+    try:
+        t = ex.fetch_ticker(SYMBOL)
+        return t.get("last") or t.get("close")
+    except Exception:
+        return None
+
+def balance_usdt():
+    """الحصول على الرصيد"""
+    if not MODE_LIVE:
+        return 100.0
+    try:
+        b = ex.fetch_balance(params={"type":"swap"})
+        return b.get("total",{}).get("USDT") or b.get("free",{}).get("USDT")
+    except Exception:
+        return None
+
+def fetch_ohlcv(limit=600):
+    """جلب بيانات OHLCV"""
+    rows = ex.fetch_ohlcv(SYMBOL, timeframe=INTERVAL, limit=limit, params={"type":"swap"})
+    return pd.DataFrame(rows, columns=["time","open","high","low","close","volume"])
+
+def compute_indicators(df: pd.DataFrame):
+    """حساب المؤشرات الأساسية"""
+    if len(df) < 20:
+        return {"rsi":50.0,"plus_di":0.0,"minus_di":0.0,"dx":0.0,"adx":0.0,"atr":0.0}
+    
+    c = df["close"].astype(float)
+    h = df["high"].astype(float)
+    l = df["low"].astype(float)
+    
+    # ATR بسيط
+    tr = pd.concat([(h-l).abs(), (h-c.shift(1)).abs(), (l-c.shift(1)).abs()], axis=1).max(axis=1)
+    atr = tr.rolling(14).mean()
+    
+    # RSI بسيط
+    delta = c.diff()
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    avg_gain = gain.rolling(14).mean()
+    avg_loss = loss.rolling(14).mean()
+    rs = avg_gain / (avg_loss + 1e-12)
+    rsi = 100 - (100 / (1 + rs))
+    
+    # ADX مبسط
+    up_move = h.diff()
+    down_move = -l.diff()
+    plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0)
+    minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0)
+    
+    atr_smooth = atr.rolling(14).mean()
+    plus_di = 100 * (plus_dm.rolling(14).mean() / (atr_smooth + 1e-12))
+    minus_di = 100 * (minus_dm.rolling(14).mean() / (atr_smooth + 1e-12))
+    dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di + 1e-12)
+    adx = dx.rolling(14).mean()
+    
+    i = len(df)-1
+    return {
+        "rsi": float(rsi.iloc[i]) if len(rsi) > i else 50.0,
+        "plus_di": float(plus_di.iloc[i]) if len(plus_di) > i else 0.0,
+        "minus_di": float(minus_di.iloc[i]) if len(minus_di) > i else 0.0,
+        "adx": float(adx.iloc[i]) if len(adx) > i else 0.0,
+        "atr": float(atr.iloc[i]) if len(atr) > i else 0.001
+    }
+
+def rf_signal_live(df: pd.DataFrame):
+    """إشارة Range Filter مبسطة"""
+    if len(df) < 20:
+        return {"long": False, "short": False, "price": 0.0}
+    
+    close = df['close'].astype(float)
+    src = close
+    
+    # Range Filter مبسط
+    avrng = abs(src - src.shift(1)).rolling(18).mean()
+    rsize = avrng * 3.0
+    
+    filt = src.copy()
+    for i in range(1, len(src)):
+        prev = filt.iloc[i-1]
+        x = src.iloc[i]
+        r = rsize.iloc[i]
+        
+        if x - r > prev:
+            filt.iloc[i] = x - r
+        elif x + r < prev:
+            filt.iloc[i] = x + r
+        else:
+            filt.iloc[i] = prev
+    
+    p_now = float(src.iloc[-1])
+    p_prev = float(src.iloc[-2])
+    f_now = float(filt.iloc[-1])
+    f_prev = float(filt.iloc[-2])
+    
+    long_flip = (p_prev <= f_prev and p_now > f_now)
+    short_flip = (p_prev >= f_prev and p_now < f_now)
+    
+    return {
+        "long": bool(long_flip),
+        "short": bool(short_flip),
+        "price": p_now
+    }
+
+def council_votes_pro_enhanced(df):
+    """إشارة مجلس مبسطة للتكامل"""
+    ind = compute_indicators(df)
+    
+    # إشارة مبسطة بناءً على RSI وADX
+    rsi = safe_get(ind, 'rsi', 50)
+    adx = safe_get(ind, 'adx', 0)
+    
+    score_b = 0
+    score_s = 0
+    
+    if rsi < 40 and adx > 20:
+        score_b = 3
+    elif rsi > 60 and adx > 20:
+        score_s = 3
+    elif rsi < 30:
+        score_b = 2
+    elif rsi > 70:
+        score_s = 2
+    
+    return {
+        "b": 1 if score_b > 0 else 0,
+        "s": 1 if score_s > 0 else 0,
+        "score_b": float(score_b),
+        "score_s": float(score_s),
+        "confidence": min(0.8, adx / 50)
+    }
+
+def orderbook_spread_bps():
+    """حساب انتشار الأوردر بوك"""
+    try:
+        ob = ex.fetch_order_book(SYMBOL, limit=5)
+        bid = ob["bids"][0][0] if ob["bids"] else None
+        ask = ob["asks"][0][0] if ob["asks"] else None
+        if not (bid and ask):
+            return 0.0
+        mid = (bid+ask)/2.0
+        return ((ask-bid)/mid)*10000.0
+    except Exception:
+        return 0.0
+
+def time_to_candle_close(df: pd.DataFrame) -> int:
+    """الوقت المتبقي لإغلاق الشمعة"""
+    if len(df) == 0:
+        return 60
+    return 30  # قيمة مبسطة
+
+def apply_smart_profit_strategy():
+    """إستراتيجية جني الأرباح الذكية المبسطة"""
+    if not STATE.get("open") or STATE["qty"] <= 0:
+        return
+    
+    try:
+        current_price = price_now()
+        if not current_price or not STATE.get("entry"):
+            return
+        
+        entry_price = STATE["entry"]
+        side = STATE["side"]
+        
+        if side == "long":
+            pnl_pct = ((current_price - entry_price) / entry_price) * 100
+        else:
+            pnl_pct = ((entry_price - current_price) / entry_price) * 100
+        
+        # إغلاق عند تحقيق ربح معين
+        trade_type = STATE.get("trade_type", "MID_TREND")
+        
+        if trade_type == "LARGE_TREND" and pnl_pct >= 3.0:
+            close_market_strict(f"LARGE_TREND TP: {pnl_pct:.2f}%")
+        elif trade_type == "MID_TREND" and pnl_pct >= 1.5:
+            close_market_strict(f"MID_TREND TP: {pnl_pct:.2f}%")
+        elif pnl_pct >= 0.8:
+            close_market_strict(f"SCALP TP: {pnl_pct:.2f}%")
+        
+        # وقف الخسارة
+        if pnl_pct <= -2.0:
+            close_market_strict(f"STOP LOSS: {pnl_pct:.2f}%")
+            
+    except Exception as e:
+        log_w(f"Profit strategy error: {e}")
+
+def open_market_enhanced(side, qty, price):
+    """فتح صفقة محسنة"""
+    if qty <= 0 or price is None:
+        return False
+    
+    log_g(f"Opening {side.upper()} position: {qty:.4f} @ {price:.6f}")
+    
+    if DRY_RUN or not EXECUTE_ORDERS:
+        STATE.update({
+            "open": True,
+            "side": side,
+            "entry": float(price),
+            "qty": float(qty),
+            "pnl": 0.0,
+            "bars": 0
+        })
+        return True
+    
+    try:
+        if MODE_LIVE:
+            params = {}
+            if EXCHANGE_NAME == "bybit":
+                params = {"reduceOnly": False}
+            else:
+                params = {"reduceOnly": False}
+            
+            ex.create_order(SYMBOL, "market", side, qty, None, params)
+            
+            STATE.update({
+                "open": True,
+                "side": side,
+                "entry": float(price),
+                "qty": float(qty),
+                "pnl": 0.0,
+                "bars": 0
+            })
+            return True
+    except Exception as e:
+        log_e(f"Open market error: {e}")
+    
+    return False
+
+def close_market_strict(reason="STRICT"):
+    """إغلاق صفقة صارم"""
+    log_w(f"Closing position: {reason}")
+    
+    if not STATE.get("open"):
+        return
+    
+    side = STATE["side"]
+    qty = STATE["qty"]
+    
+    if DRY_RUN or not EXECUTE_ORDERS:
+        STATE.update({
+            "open": False,
+            "side": None,
+            "entry": None,
+            "qty": 0.0,
+            "pnl": 0.0,
+            "bars": 0
+        })
+        return
+    
+    try:
+        if MODE_LIVE:
+            close_side = "sell" if side == "long" else "buy"
+            params = {"reduceOnly": True}
+            
+            ex.create_order(SYMBOL, "market", close_side, qty, None, params)
+            
+            STATE.update({
+                "open": False,
+                "side": None,
+                "entry": None,
+                "qty": 0.0,
+                "pnl": 0.0,
+                "bars": 0
+            })
+    except Exception as e:
+        log_e(f"Close market error: {e}")
+
+def wait_gate_allow(df, info):
+    """التحقق من بوابة الانتظار"""
+    if wait_for_next_signal_side is None:
+        return True, ""
+    
+    need = (wait_for_next_signal_side == "buy" and info.get("long")) or \
+           (wait_for_next_signal_side == "sell" and info.get("short"))
+    
+    if need:
+        return True, ""
+    return False, f"wait-for-next-RF({wait_for_next_signal_side})"
+
+def pretty_snapshot(bal, info, ind, spread_bps, reason=None, df=None):
+    """لوج حالة البوت"""
+    if LOG_LEGACY:
+        print(f"Price: {info.get('price', 0):.6f} | RSI: {safe_get(ind, 'rsi', 0):.1f} | ADX: {safe_get(ind, 'adx', 0):.1f}")
+        print(f"Balance: {bal:.2f} | Position: {'OPEN' if STATE.get('open') else 'CLOSED'}")
+
+# =================== STATE INITIALIZATION ===================
+STATE = {
+    "open": False,
+    "side": None,
+    "entry": None,
+    "qty": 0.0,
+    "pnl": 0.0,
+    "bars": 0,
+    "trade_type": "MID_TREND",
+    "entry_confidence": 0.0,
+    "entry_reason": "",
+    "last_spread_bps": 0.0
+}
+
+wait_for_next_signal_side = None
+compound_pnl = 0.0
+
+# =================== SETTINGS ===================
+SYMBOL = os.getenv("SYMBOL", "SUI/USDT:USDT")
+INTERVAL = os.getenv("INTERVAL", "15m")
+LEVERAGE = 10
+RISK_ALLOC = 0.60
+BASE_SLEEP = 5
+NEAR_CLOSE_S = 1
+
+# =================== FLASK APP ===================
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return f"SUI ULTRA PRO AI BOT with Smart Money Engine - {EXCHANGE_NAME.upper()} - {SYMBOL}"
+
+@app.route("/health")
+def health():
+    return jsonify({
+        "status": "running",
+        "exchange": EXCHANGE_NAME,
+        "symbol": SYMBOL,
+        "position_open": STATE.get("open", False),
+        "smart_money_engine": "active"
+    })
+
+def keepalive_loop():
+    """حلقة الحفاظ على التشغيل"""
+    import requests
+    url = (SELF_URL or "").strip().rstrip("/")
+    if not url:
+        return
+    
+    log_i(f"Keepalive started: {url}")
+    while True:
+        try:
+            requests.get(url, timeout=8)
+        except:
+            pass
+        time.sleep(50)
 
 # =================== MAIN EXECUTION ===================
 if __name__ == "__main__":
