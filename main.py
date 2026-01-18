@@ -9,6 +9,7 @@ SUI ULTRA PRO AI BOT - الإصدار الذكي المتقدم المتكامل
 • Multi-Exchange Support: BingX & Bybit
 • نظام مراكبة الأرباح الذكي
 • نظام TradePlan الذكي - كل صفقة لها خطة مسبقة
+• بدون TA-Lib - متوافق مع Render
 """
 
 import os, time, math, random, signal, sys, traceback, logging, json
@@ -19,13 +20,206 @@ import numpy as np
 import ccxt
 from flask import Flask, jsonify
 from decimal import Decimal, ROUND_DOWN, InvalidOperation
-import talib
-from scipy import stats
 
 try:
     from termcolor import colored
 except Exception:
     def colored(t,*a,**k): return t
+
+# =================== CUSTOM INDICATORS (بدون TA-Lib) ===================
+
+def calculate_rsi(prices, period=14):
+    """حساب RSI بدون TA-Lib"""
+    if len(prices) < period:
+        return 50.0
+    
+    deltas = np.diff(prices)
+    seed = deltas[:period]
+    up = seed[seed >= 0].sum() / period
+    down = -seed[seed < 0].sum() / period
+    
+    if down == 0:
+        return 100.0
+    
+    rs = up / down
+    rsi = 100.0 - (100.0 / (1.0 + rs))
+    
+    for i in range(period, len(deltas)):
+        delta = deltas[i]
+        
+        if delta > 0:
+            up_val = delta
+            down_val = 0.0
+        else:
+            up_val = 0.0
+            down_val = -delta
+        
+        up = (up * (period - 1) + up_val) / period
+        down = (down * (period - 1) + down_val) / period
+        
+        if down == 0:
+            rs = 0
+        else:
+            rs = up / down
+        
+        rsi = 100.0 - (100.0 / (1.0 + rs))
+    
+    return float(rsi)
+
+def calculate_sma(prices, period):
+    """حساب المتوسط المتحرك البسيط"""
+    if len(prices) < period:
+        return float(prices[-1]) if len(prices) > 0 else 0.0
+    return float(np.mean(prices[-period:]))
+
+def calculate_ema(prices, period):
+    """حساب المتوسط المتحرك الأسي"""
+    if len(prices) < period:
+        return float(prices[-1]) if len(prices) > 0 else 0.0
+    
+    alpha = 2 / (period + 1)
+    ema = prices[0]
+    
+    for price in prices[1:]:
+        ema = alpha * price + (1 - alpha) * ema
+    
+    return float(ema)
+
+def calculate_atr(high, low, close, period=14):
+    """حساب ATR (متوسط المدى الحقيقي)"""
+    if len(high) < period or len(low) < period or len(close) < period:
+        return 0.0
+    
+    high = np.array(high)
+    low = np.array(low)
+    close = np.array(close)
+    
+    tr = np.maximum(high[1:] - low[1:], 
+                   np.maximum(np.abs(high[1:] - close[:-1]), 
+                            np.abs(low[1:] - close[:-1])))
+    
+    atr = np.mean(tr[-period:]) if len(tr) >= period else np.mean(tr)
+    return float(atr)
+
+def calculate_macd(prices, fast=12, slow=26, signal=9):
+    """حساب MACD"""
+    if len(prices) < slow:
+        return 0.0, 0.0, 0.0
+    
+    # حساب EMA السريع والبطيء
+    fast_ema = calculate_ema(prices, fast)
+    slow_ema = calculate_ema(prices, slow)
+    
+    # MACD الخط
+    macd_line = fast_ema - slow_ema
+    
+    # خط الإشارة (EMA لـ MACD)
+    # نحتاج لتاريخ من قيم MACD لحساب خط الإشارة
+    macd_values = []
+    for i in range(len(prices)):
+        if i >= slow:
+            fast_ema_i = calculate_ema(prices[:i+1], fast)
+            slow_ema_i = calculate_ema(prices[:i+1], slow)
+            macd_values.append(fast_ema_i - slow_ema_i)
+    
+    signal_line = calculate_ema(np.array(macd_values[-signal*2:]), signal) if len(macd_values) >= signal else macd_line
+    
+    # الهيستوجرام
+    histogram = macd_line - signal_line
+    
+    return macd_line, signal_line, histogram
+
+def calculate_bb(prices, period=20, std_dev=2):
+    """حساب بولينجر باندز"""
+    if len(prices) < period:
+        middle = float(prices[-1]) if len(prices) > 0 else 0.0
+        return middle, middle, middle
+    
+    prices_slice = prices[-period:]
+    middle = np.mean(prices_slice)
+    std = np.std(prices_slice)
+    
+    upper = middle + (std * std_dev)
+    lower = middle - (std * std_dev)
+    
+    return float(upper), float(middle), float(lower)
+
+def calculate_stochastic(high, low, close, k_period=14, d_period=3):
+    """حساب ستوكاستك"""
+    if len(high) < k_period:
+        return 50.0, 50.0
+    
+    high = np.array(high)
+    low = np.array(low)
+    close = np.array(close)
+    
+    # حساب %K
+    k_values = []
+    for i in range(k_period-1, len(high)):
+        high_slice = high[i-k_period+1:i+1]
+        low_slice = low[i-k_period+1:i+1]
+        current_close = close[i]
+        
+        highest_high = np.max(high_slice)
+        lowest_low = np.min(low_slice)
+        
+        if highest_high == lowest_low:
+            k = 50.0
+        else:
+            k = 100 * (current_close - lowest_low) / (highest_high - lowest_low)
+        
+        k_values.append(k)
+    
+    # حساب %D (متوسط %K)
+    if len(k_values) < d_period:
+        d_values = k_values
+    else:
+        d_values = []
+        for i in range(d_period-1, len(k_values)):
+            d_values.append(np.mean(k_values[i-d_period+1:i+1]))
+    
+    k_final = k_values[-1] if k_values else 50.0
+    d_final = d_values[-1] if d_values else k_final
+    
+    return float(k_final), float(d_final)
+
+def calculate_adx(high, low, close, period=14):
+    """حساب ADX مبسط (بدون DI+ و DI-)"""
+    if len(high) < period:
+        return 20.0, 25.0, 15.0  # قيم محايدة
+    
+    # حساب TR
+    tr_list = []
+    for i in range(1, len(high)):
+        tr = max(
+            high[i] - low[i],
+            abs(high[i] - close[i-1]),
+            abs(low[i] - close[i-1])
+        )
+        tr_list.append(tr)
+    
+    # ATR
+    atr = np.mean(tr_list[-period:]) if len(tr_list) >= period else np.mean(tr_list)
+    
+    # ADX مبسط (نرجع قيم تقريبية)
+    volatility = atr / close[-1] * 100
+    
+    if volatility > 2.0:
+        adx = 35.0  # ترند قوي
+    elif volatility > 1.0:
+        adx = 25.0  # ترند متوسط
+    else:
+        adx = 15.0  # ترند ضعيف
+    
+    # قيم DI+ و DI- تقريبية
+    if close[-1] > close[-min(10, len(close)-1)]:
+        di_plus = 30.0
+        di_minus = 20.0
+    else:
+        di_plus = 20.0
+        di_minus = 30.0
+    
+    return float(adx), float(di_plus), float(di_minus)
 
 # =================== ENV / MODE ===================
 EXCHANGE_NAME = os.getenv("EXCHANGE", "bingx").lower()
@@ -892,56 +1086,57 @@ def compute_flow_metrics(df):
     except Exception as e:
         return {"ok": False, "why": str(e)}
 
-# =================== ADVANCED INDICATORS ===================
+# =================== ADVANCED INDICATORS (بدون TA-Lib) ===================
 def compute_advanced_indicators(df):
-    """حساب المؤشرات المتقدمة"""
+    """حساب المؤشرات المتقدمة بدون TA-Lib"""
     try:
-        close = df['close'].astype(float)
-        high = df['high'].astype(float)
-        low = df['low'].astype(float)
-        volume = df['volume'].astype(float)
+        close = df['close'].astype(float).values
+        high = df['high'].astype(float).values
+        low = df['low'].astype(float).values
+        volume = df['volume'].astype(float).values
         
         # مؤشرات الترند
-        sma_20 = talib.SMA(close, timeperiod=20)
-        sma_50 = talib.SMA(close, timeperiod=50)
-        ema_20 = talib.EMA(close, timeperiod=20)
+        sma_20 = calculate_sma(close, 20)
+        sma_50 = calculate_sma(close, 50)
+        ema_20 = calculate_ema(close, 20)
         
         # مؤشرات الزخم
-        rsi = talib.RSI(close, timeperiod=14)
-        macd, macd_signal, macd_hist = talib.MACD(close)
-        stoch_k, stoch_d = talib.STOCH(high, low, close)
+        rsi = calculate_rsi(close, 14)
+        macd, macd_signal, macd_hist = calculate_macd(close)
+        stoch_k, stoch_d = calculate_stochastic(high, low, close)
         
         # مؤشرات التقلب
-        atr = talib.ATR(high, low, close, timeperiod=14)
-        bollinger_upper, bollinger_middle, bollinger_lower = talib.BBANDS(close, timeperiod=20, nbdevup=2, nbdevdn=2)
+        atr = calculate_atr(high, low, close, 14)
+        bb_upper, bb_middle, bb_lower = calculate_bb(close)
         
         # مؤشرات الحجم
-        obv = talib.OBV(close, volume)
+        obv = 0.0  # OBV مبسط
+        if len(volume) > 1:
+            obv = np.sum(np.where(close[1:] > close[:-1], volume[1:], 
+                                 np.where(close[1:] < close[:-1], -volume[1:], 0)))
         
         # مؤشرات الاتجاه
-        adx = talib.ADX(high, low, close, timeperiod=14)
-        plus_di = talib.PLUS_DI(high, low, close, timeperiod=14)
-        minus_di = talib.MINUS_DI(high, low, close, timeperiod=14)
+        adx, plus_di, minus_di = calculate_adx(high, low, close, 14)
         
         return {
-            'sma_20': last_scalar(sma_20),
-            'sma_50': last_scalar(sma_50),
-            'ema_20': last_scalar(ema_20),
-            'rsi': last_scalar(rsi),
-            'macd': last_scalar(macd),
-            'macd_signal': last_scalar(macd_signal),
-            'macd_hist': last_scalar(macd_hist),
-            'stoch_k': last_scalar(stoch_k),
-            'stoch_d': last_scalar(stoch_d),
-            'atr': last_scalar(atr),
-            'bollinger_upper': last_scalar(bollinger_upper),
-            'bollinger_middle': last_scalar(bollinger_middle),
-            'bollinger_lower': last_scalar(bollinger_lower),
-            'obv': last_scalar(obv),
-            'adx': last_scalar(adx),
-            'plus_di': last_scalar(plus_di),
-            'minus_di': last_scalar(minus_di),
-            'volume': last_scalar(volume)
+            'sma_20': sma_20,
+            'sma_50': sma_50,
+            'ema_20': ema_20,
+            'rsi': rsi,
+            'macd': macd,
+            'macd_signal': macd_signal,
+            'macd_hist': macd_hist,
+            'stoch_k': stoch_k,
+            'stoch_d': stoch_d,
+            'atr': atr,
+            'bollinger_upper': bb_upper,
+            'bollinger_middle': bb_middle,
+            'bollinger_lower': bb_lower,
+            'obv': obv,
+            'adx': adx,
+            'plus_di': plus_di,
+            'minus_di': minus_di,
+            'volume': volume[-1] if len(volume) > 0 else 0
         }
     except Exception as e:
         log_w(f"Advanced indicators error: {e}")
@@ -950,31 +1145,29 @@ def compute_advanced_indicators(df):
 def compute_indicators(df):
     """حساب المؤشرات الأساسية"""
     try:
-        close = df['close'].astype(float)
-        high = df['high'].astype(float)
-        low = df['low'].astype(float)
+        close = df['close'].astype(float).values
+        high = df['high'].astype(float).values
+        low = df['low'].astype(float).values
         
         # ADX و DI
-        adx = talib.ADX(high, low, close, timeperiod=ADX_LEN)
-        plus_di = talib.PLUS_DI(high, low, close, timeperiod=ADX_LEN)
-        minus_di = talib.MINUS_DI(high, low, close, timeperiod=ADX_LEN)
+        adx, plus_di, minus_di = calculate_adx(high, low, close, ADX_LEN)
         di_spread = plus_di - minus_di
         
         # RSI
-        rsi = talib.RSI(close, timeperiod=RSI_LEN)
-        rsi_ma = talib.SMA(rsi, timeperiod=RSI_MA_LEN)
+        rsi = calculate_rsi(close, RSI_LEN)
+        rsi_ma = calculate_sma(close, RSI_MA_LEN)
         
         # ATR
-        atr = talib.ATR(high, low, close, timeperiod=ATR_LEN)
+        atr = calculate_atr(high, low, close, ATR_LEN)
         
         return {
-            'adx': last_scalar(adx),
-            'plus_di': last_scalar(plus_di),
-            'minus_di': last_scalar(minus_di),
-            'di_spread': last_scalar(di_spread),
-            'rsi': last_scalar(rsi),
-            'rsi_ma': last_scalar(rsi_ma),
-            'atr': last_scalar(atr)
+            'adx': adx,
+            'plus_di': plus_di,
+            'minus_di': minus_di,
+            'di_spread': di_spread,
+            'rsi': rsi,
+            'rsi_ma': rsi_ma,
+            'atr': atr
         }
     except Exception as e:
         log_w(f"Basic indicators error: {e}")
@@ -1315,8 +1508,8 @@ def determine_trend_class(df, indicators):
         
         # تحليل متعدد الأطر الزمنية
         close = df['close'].astype(float)
-        sma_20 = talib.SMA(close, 20)
-        sma_50 = talib.SMA(close, 50)
+        sma_20 = close.rolling(20).mean()
+        sma_50 = close.rolling(50).mean()
         
         price_above_sma20 = close.iloc[-1] > sma_20.iloc[-1] if len(sma_20) > 0 else False
         price_above_sma50 = close.iloc[-1] > sma_50.iloc[-1] if len(sma_50) > 0 else False
@@ -1780,12 +1973,12 @@ def check_momentum_failure(df, side):
         if len(df) < 10:
             return False
         
-        rsi = talib.RSI(df['close'].astype(float), 14)
-        if len(rsi) < 2:
-            return False
-            
-        current_rsi = rsi.iloc[-1]
-        prev_rsi = rsi.iloc[-2]
+        # استخدام RSI الخاص بنا
+        close = df['close'].astype(float).values
+        rsi = calculate_rsi(close, 14)
+        
+        current_rsi = rsi
+        prev_rsi = calculate_rsi(close[:-1], 14) if len(close) > 1 else current_rsi
         
         if side == "buy" and current_rsi < 40 and current_rsi < prev_rsi:
             return True
@@ -2089,7 +2282,7 @@ def update_intelligent_trailing_stop(current_price, side, indicators, market_pha
                 new_trail = current_price + (atr * trail_mult)
                 if STATE.get("trail") is None or new_trail < STATE["trail"]:
                     STATE["trail"] = new_trail
-                    if STATE["trail"] < STATE.get("entry", float('inf')):
+                    if new_trail < STATE.get("entry", float('inf')):
                         log_i(f"🔽 Intelligent trail updated: {STATE['trail']:.6f}")
         
         # تفعيل وقف الخسارة عند نقطة التعادل بعد تحقيق ربح معين
