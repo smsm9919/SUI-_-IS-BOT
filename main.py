@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 SUI ULTRA PRO AI BOT - الإصدار الذكي المتكامل مع نظام إدارة الصفقات المتقدم
-• نظام إدارة المراحل الذكي (Entry → Protect → BE → Trail → Trim → Exit)
-• نظام TradePlan الذكي (قلب البوت الجديد)
-• لوج احترافي ذكي مع ألوان وأيقونات وأسباب القرارات
-• Structure-Based Trailing (ليس ATR تقليدي)
+• نظام TradePlan الذكي (خطة صفقة قبل الدخول)
+• نظام إدارة المراحل الذكي مع تصنيف MID/LARGE
+• لوج احترافي ذكي مع أسباب القرارات والخطط
+• إدارة السيولة الذكية (Liquidity-Based Targets)
+• نظام Fail-Fast للخروج السريع من الصفقات الخاطئة
 • حماية تنفيذية من أخطاء Bybit/MinQty
-• نظام Trim الذكي لتقليل المخاطرة
-• Fail-Fast Logic (قتل الصفقات الغلط بدري)
 • واجهة Flask API للتتبع والمراقبة
 """
 
@@ -78,7 +77,7 @@ class LogCategory(Enum):
     SYSTEM = "SYSTEM"
     ERROR = "ERROR"
     DEBUG = "DEBUG"
-    PLAN = "PLAN"  # إضافة فئة جديدة للخطط
+    PLAN = "PLAN"  # إضافة فئة للخطط
 
 class ProConsoleLogger:
     """
@@ -144,7 +143,7 @@ class ProConsoleLogger:
             'bg_color': None
         },
         LogCategory.PLAN: {
-            'color': ConsoleColors.LIGHT_MAGENTA,
+            'color': ConsoleColors.LIGHT_CYAN,
             'icon': '📋',
             'emoji': '🧠',
             'width': 10,
@@ -171,8 +170,8 @@ class ProConsoleLogger:
         'CONSOLIDATION': '↔️',
         'PLAN': '📋',
         'TARGET': '🎯',
-        'STOP': '🛑',
-        'LIQUIDITY': '💧'
+        'LIQUIDITY': '💧',
+        'STRUCTURE': '🏗️'
     }
     
     def __init__(self, show_timestamp: bool = True, show_emoji: bool = True):
@@ -254,6 +253,53 @@ class ProConsoleLogger:
             value_str = str(value)
         
         return f"{ConsoleColors.LIGHT_BLACK}{key}={color}{value_str}{ConsoleColors.LIGHT_BLACK}{unit}{ConsoleColors.RESET}"
+    
+    def log_plan(self, plan_data: Dict[str, Any], status: str = "CREATED"):
+        """تسجيل خطة الصفقة"""
+        header = self._get_layer_header(LogCategory.PLAN)
+        
+        # بناء الرسالة
+        parts = []
+        
+        if 'side' in plan_data:
+            side_color = ConsoleColors.GREEN if plan_data['side'] == 'BUY' else ConsoleColors.RED
+            parts.append(f"Side={side_color}{plan_data['side']}{ConsoleColors.RESET}")
+        
+        if 'trend_class' in plan_data:
+            parts.append(f"Trend={plan_data['trend_class']}")
+        
+        if 'rr_expected' in plan_data:
+            rr = plan_data['rr_expected']
+            rr_color = ConsoleColors.GREEN if rr >= 2 else ConsoleColors.YELLOW if rr >= 1 else ConsoleColors.RED
+            parts.append(f"RR={rr_color}1:{rr:.1f}{ConsoleColors.RESET}")
+        
+        if 'valid' in plan_data:
+            valid_icon = self.STATUS_ICONS['CHECK'] if plan_data['valid'] else self.STATUS_ICONS['CROSS']
+            valid_color = ConsoleColors.GREEN if plan_data['valid'] else ConsoleColors.RED
+            parts.append(f"Valid={valid_color}{valid_icon}{ConsoleColors.RESET}")
+        
+        message = f"{ConsoleColors.LIGHT_WHITE} | ".join(parts) + ConsoleColors.RESET
+        
+        # الطباعة
+        if self.show_timestamp:
+            print(f"{ConsoleColors.LIGHT_BLACK}[{self._format_timestamp()}]{ConsoleColors.RESET} {header} {message}")
+        else:
+            print(f"{header} {message}")
+        
+        # تفاصيل الخطة
+        if 'entry_reason' in plan_data:
+            indent = " " * (len(self._format_timestamp()) + 3 if self.show_timestamp else 0)
+            reasons = plan_data['entry_reason']
+            reason_text = " | ".join([f"{k}: {v}" for k, v in reasons.items() if v])
+            print(f"{indent}{ConsoleColors.LIGHT_CYAN}Reasons: {reason_text}{ConsoleColors.RESET}")
+        
+        # إذا كانت الخطة مرفوضة، عرض السبب
+        if not plan_data.get('valid', False) and 'reason' in plan_data:
+            indent = " " * (len(self._format_timestamp()) + 3 if self.show_timestamp else 0)
+            print(f"{indent}{ConsoleColors.RED}❌ Blocked: {plan_data['reason']}{ConsoleColors.RESET}")
+        
+        # تسجيل في الملف
+        self.file_logger.info(f"PLAN | {status} | {json.dumps(plan_data, default=str)}")
     
     def log_market(self, 
                   timeframe: str,
@@ -689,216 +735,114 @@ class ProConsoleLogger:
         
         # تسجيل في الملف
         self.file_logger.debug(f"DEBUG | {message}")
-    
-    def log_plan(self, plan_details: Dict, title: str = "TRADE PLAN"):
-        """
-        تسجيل خطة التداول
-        
-        Args:
-            plan_details: تفاصيل الخطة
-            title: عنوان اللوج
-        """
-        header = self._get_layer_header(LogCategory.PLAN)
-        
-        # طباعة عنوان الخطة
-        border = "━" * 40
-        if self.show_timestamp:
-            print(f"{ConsoleColors.LIGHT_BLACK}[{self._format_timestamp()}]{ConsoleColors.RESET} {header} {ConsoleColors.LIGHT_MAGENTA}┏{border}┓{ConsoleColors.RESET}")
-            print(f"{ConsoleColors.LIGHT_BLACK}[{self._format_timestamp()}]{ConsoleColors.RESET} {header} {ConsoleColors.LIGHT_MAGENTA}┃ {ConsoleColors.BOLD}{title}{ConsoleColors.RESET}{ConsoleColors.LIGHT_MAGENTA}{' ' * (38 - len(title))}┃{ConsoleColors.RESET}")
-            print(f"{ConsoleColors.LIGHT_BLACK}[{self._format_timestamp()}]{ConsoleColors.RESET} {header} {ConsoleColors.LIGHT_MAGENTA}┣{border}┫{ConsoleColors.RESET}")
-        else:
-            print(f"{header} {ConsoleColors.LIGHT_MAGENTA}┏{border}┓{ConsoleColors.RESET}")
-            print(f"{header} {ConsoleColors.LIGHT_MAGENTA}┃ {ConsoleColors.BOLD}{title}{ConsoleColors.RESET}{ConsoleColors.LIGHT_MAGENTA}{' ' * (38 - len(title))}┃{ConsoleColors.RESET}")
-            print(f"{header} {ConsoleColors.LIGHT_MAGENTA}┣{border}┫{ConsoleColors.RESET}")
-        
-        # تفاصيل الخطة
-        for key, value in plan_details.items():
-            # تحديد اللون بناءً على نوع القيمة
-            if key in ['side', 'signal']:
-                if str(value).upper() == 'BUY':
-                    value_color = ConsoleColors.GREEN
-                    value_icon = '🟢'
-                else:
-                    value_color = ConsoleColors.RED
-                    value_icon = '🔴'
-                value_str = f"{value_icon} {value}"
-            elif key in ['trend_class', 'trend']:
-                if str(value).upper() == 'LARGE':
-                    value_color = ConsoleColors.CYAN
-                elif str(value).upper() == 'BULL':
-                    value_color = ConsoleColors.GREEN
-                elif str(value).upper() == 'BEAR':
-                    value_color = ConsoleColors.RED
-                else:
-                    value_color = ConsoleColors.YELLOW
-                value_str = str(value)
-            elif 'liquidity' in key.lower():
-                value_color = ConsoleColors.LIGHT_BLUE
-                value_str = f"💧 {value}"
-            elif 'structure' in key.lower():
-                value_color = ConsoleColors.LIGHT_YELLOW
-                value_str = f"🏗️ {value}"
-            elif 'zone' in key.lower():
-                value_color = ConsoleColors.LIGHT_MAGENTA
-                value_str = f"📍 {value}"
-            elif 'sl' in key.lower() or 'stop' in key.lower():
-                value_color = ConsoleColors.RED
-                value_str = f"🛑 {value}"
-            elif 'tp' in key.lower() or 'target' in key.lower():
-                value_color = ConsoleColors.GREEN
-                value_str = f"🎯 {value}"
-            elif 'confirmation' in key.lower():
-                value_color = ConsoleColors.LIGHT_GREEN
-                value_str = f"✅ {value}"
-            elif 'invalid' in key.lower():
-                value_color = ConsoleColors.LIGHT_RED
-                value_str = f"❌ {value}"
-            else:
-                value_color = ConsoleColors.LIGHT_WHITE
-                value_str = str(value)
-            
-            if self.show_timestamp:
-                print(f"{ConsoleColors.LIGHT_BLACK}[{self._format_timestamp()}]{ConsoleColors.RESET} {header} {ConsoleColors.LIGHT_MAGENTA}┃ {ConsoleColors.LIGHT_BLACK}{key}: {value_color}{value_str}{ConsoleColors.LIGHT_MAGENTA}{' ' * (36 - len(key) - len(str(value_str)))}┃{ConsoleColors.RESET}")
-            else:
-                print(f"{header} {ConsoleColors.LIGHT_MAGENTA}┃ {ConsoleColors.LIGHT_BLACK}{key}: {value_color}{value_str}{ConsoleColors.LIGHT_MAGENTA}{' ' * (36 - len(key) - len(str(value_str)))}┃{ConsoleColors.RESET}")
-        
-        # نهاية الخطة
-        if self.show_timestamp:
-            print(f"{ConsoleColors.LIGHT_BLACK}[{self._format_timestamp()}]{ConsoleColors.RESET} {header} {ConsoleColors.LIGHT_MAGENTA}┗{border}┛{ConsoleColors.RESET}")
-        else:
-            print(f"{header} {ConsoleColors.LIGHT_MAGENTA}┗{border}┛{ConsoleColors.RESET}")
-        
-        # تسجيل في الملف
-        self.file_logger.info(f"PLAN | {title} | Details: {json.dumps(plan_details)}")
-    
-    def log_blocked_entry(self, reason: str, details: Dict = None):
-        """تسجيل منع دخول صفقة"""
-        header = self._get_layer_header(LogCategory.ENTRY)
-        
-        message = f"{ConsoleColors.RED}🚫 ENTRY BLOCKED: {reason}{ConsoleColors.RESET}"
-        
-        if details:
-            details_str = " | ".join([f"{k}={v}" for k, v in details.items()])
-            message += f" | {ConsoleColors.LIGHT_BLACK}{details_str}{ConsoleColors.RESET}"
-        
-        if self.show_timestamp:
-            print(f"{ConsoleColors.LIGHT_BLACK}[{self._format_timestamp()}]{ConsoleColors.RESET} {header} {message}")
-        else:
-            print(f"{header} {message}")
-        
-        # تسجيل في الملف
-        self.file_logger.warning(f"ENTRY BLOCKED | Reason: {reason} | Details: {details if details else 'N/A'}")
 
 # إنشاء كائن اللوجر العام
 logger = ProConsoleLogger(show_timestamp=True, show_emoji=True)
 
 # ============================================
-#  TRADE PLAN STRUCTURE - قلب البوت الجديد
+#  TRADE PLAN - خطة الصفقة الذكية
 # ============================================
 
 class TradePlan:
-    """خطة التداول الذكية (قلب البوت)"""
+    """خطة الصفقة - العقل الذي يدير الصفقة من البداية للنهاية"""
     
     def __init__(self, side: str, trend_class: str):
-        """
-        تهيئة خطة التداول
-        
-        Args:
-            side: اتجاه الصفقة (BUY/SELL)
-            trend_class: نوع الاتجاه (MID/LARGE)
-        """
-        self.side = side.upper()                # BUY / SELL
+        self.side = side.upper()  # BUY / SELL
         self.trend_class = trend_class.upper()  # MID / LARGE
         
         # أسباب الدخول
         self.entry_reason = {
-            "liquidity": None,      # sweep_high / sweep_low
-            "structure": None,      # BOS / CHoCH
+            "liquidity": None,      # sweep_low / sweep_high
+            "structure": None,      # BOS / CHoCH / OB
             "zone": None,           # OB / FVG / DEMAND / SUPPLY
-            "confirmation": None    # rejection / engulf / pin_bar
+            "confirmation": None    # rejection / engulf / absorption
         }
         
-        # مستويات الدخول والإبطال
-        self.entry_price = None
-        self.invalidation = None   # مستوى إبطال الصفقة
+        # مستوى الإبطال (حيث تصبح الصفقة خاطئة)
+        self.invalidation = None
+        self.invalidation_reason = ""
         
-        # مستويات وقف الخسارة والأهداف
-        self.stop_loss = None
-        self.take_profit_1 = None
-        self.take_profit_2 = None
-        self.take_profit_3 = None
+        # أهداف السيولة
+        self.tp1 = None  # أول سيولة داخلية
+        self.tp2 = None  # سيولة متوسطة
+        self.tp3 = None  # سيولة رئيسية (للموجات الكبيرة)
         
-        # إدارة الصفقة
-        self.trailing_mode = "STRUCTURE"  # STRUCTURE / ATR / NONE
-        self.breakeven_rule = "AFTER_TP1" # AFTER_TP1 / NONE
-        self.partial_exit_pct = 0.3       # نسبة الخروج الجزئي عند TP1
+        # إدارة المخاطرة
+        self.sl = None
+        self.risk_pct = 0.0
+        self.rr_expected = 0.0
+        
+        # نظام الإدارة
+        self.trailing_mode = "STRUCTURE"  # STRUCTURE / HYBRID
+        self.breakeven_rule = "AFTER_TP1"
+        self.partial_rules = {}
         
         # حالة الخطة
         self.created_at = time.time()
         self.valid = False
-        self.reason = ""  # سبب إنشاء الخطة
+        self.reason = ""  # سبب رفض الخطة إذا لم تكن صالحة
         
         # تتبع الأداء
         self.tp1_hit = False
         self.tp2_hit = False
         self.tp3_hit = False
-        self.stop_loss_hit = False
         
     def is_valid(self) -> bool:
         """التحقق من صلاحية الخطة"""
-        required_fields = [
-            self.stop_loss is not None,
-            self.take_profit_1 is not None,
-            self.invalidation is not None,
-            self.valid,
-            all(self.entry_reason.values())  # جميع أسباب الدخول موجودة
-        ]
+        # يجب أن يكون لدينا سبب دخول واضح
+        if not self.entry_reason["liquidity"] or not self.entry_reason["zone"]:
+            self.reason = "No valid liquidity event or zone"
+            return False
         
-        return all(required_fields)
+        # يجب أن تكون جميع العناصر الأساسية موجودة
+        if not all([self.invalidation, self.sl, self.tp1]):
+            self.reason = "Missing required fields (invalidation, sl, tp1)"
+            return False
+        
+        # يجب أن تكون نسبة العائد المتوقعة 1:2 على الأقل
+        if self.rr_expected < 1.5:
+            self.reason = f"Insufficient risk/reward: 1:{self.rr_expected:.1f}"
+            return False
+        
+        self.valid = True
+        return True
     
-    def calculate_risk_reward(self, entry_price: float = None) -> float:
-        """حساب نسبة المخاطرة/العائد"""
-        if not entry_price:
-            entry_price = self.entry_price
-        
-        if not all([entry_price, self.stop_loss, self.take_profit_1]):
-            return 0.0
-        
-        # حساب المخاطرة
+    def calculate_rr_expected(self, entry_price: float) -> float:
+        """حساب نسبة العائد المتوقعة"""
         if self.side == "BUY":
-            risk = abs(entry_price - self.stop_loss)
-            reward = abs(self.take_profit_1 - entry_price)
+            if self.sl and self.tp1:
+                risk = entry_price - self.sl
+                reward = self.tp1 - entry_price
+                if risk > 0:
+                    return reward / risk
         else:  # SELL
-            risk = abs(self.stop_loss - entry_price)
-            reward = abs(entry_price - self.take_profit_1)
-        
-        if risk == 0:
-            return 0.0
-        
-        return reward / risk
+            if self.sl and self.tp1:
+                risk = self.sl - entry_price
+                reward = entry_price - self.tp1
+                if risk > 0:
+                    return reward / risk
+        return 0.0
     
-    def get_plan_summary(self) -> Dict[str, Any]:
+    def get_summary(self) -> Dict[str, Any]:
         """الحصول على ملخص الخطة"""
-        rr_ratio = self.calculate_risk_reward()
-        
         return {
-            'side': self.side,
-            'trend_class': self.trend_class,
-            'entry_reason': self.entry_reason,
-            'entry_price': self.entry_price,
-            'stop_loss': self.stop_loss,
-            'take_profit_1': self.take_profit_1,
-            'take_profit_2': self.take_profit_2,
-            'take_profit_3': self.take_profit_3,
-            'invalidation': self.invalidation,
-            'risk_reward': f"1:{rr_ratio:.2f}" if rr_ratio > 0 else "N/A",
-            'valid': self.valid,
-            'reason': self.reason,
-            'created_at': datetime.fromtimestamp(self.created_at).isoformat()
+            "side": self.side,
+            "trend_class": self.trend_class,
+            "entry_reason": self.entry_reason,
+            "invalidation": self.invalidation,
+            "sl": self.sl,
+            "tp1": self.tp1,
+            "tp2": self.tp2,
+            "tp3": self.tp3,
+            "rr_expected": self.rr_expected,
+            "trailing_mode": self.trailing_mode,
+            "valid": self.valid,
+            "reason": self.reason,
+            "created_at": self.created_at
         }
 
 # ============================================
-#  TRADE STATE MACHINE - نظام مراحل الصفقة (محدث)
+#  TRADE STATE MACHINE - نظام مراحل الصفقة
 # ============================================
 
 class TradeState:
@@ -911,33 +855,40 @@ class TradeState:
     EXIT = "EXIT"          # خروج نهائي
 
 class TradePhaseEngine:
-    """محرك إدارة مراحل الصفقة (محدث مع TradePlan)"""
+    """محرك إدارة مراحل الصفقة مع خطة"""
     
-    def __init__(self, trade_plan: TradePlan, entry_price: float, logger: ProConsoleLogger):
-        self.trade_plan = trade_plan
+    def __init__(self, entry_price: float, side: str, trade_plan: TradePlan, logger: ProConsoleLogger):
         self.entry_price = entry_price
-        self.side = trade_plan.side
-        self.entry_zone = trade_plan.entry_reason.get('zone', 'UNKNOWN')
+        self.side = side.upper()
+        self.trade_plan = trade_plan
         self.logger = logger
         self.current_state = TradeState.ENTRY
         self.state_changed_at = time.time()
-        self.structure_levels = []  # مستويات الهيكل
-        self.last_stop_loss = trade_plan.stop_loss
+        self.structure_levels = []
+        self.last_stop_loss = trade_plan.sl
         self.trim_count = 0
         self.max_trims = 2
         self.state_log = []
         
+        # أهداف الصفقة
+        self.targets_hit = {
+            'tp1': False,
+            'tp2': False,
+            'tp3': False
+        }
+        
         # إعدادات حسب نوع الصفقة
-        self.protection_pct = 0.5  # حماية عند 0.5%
-        self.be_pct = 0.3         # نقطة التعادل عند 0.3%
-        self.trail_activation_pct = 0.8  # تفعيل التريل عند 0.8%
-        self.trim_pct = 0.2       # تقليل 20% في كل ترايم
-        
-        # تتبع TP
-        self.tp1_hit = False
-        self.tp2_hit = False
-        self.tp3_hit = False
-        
+        if trade_plan.trend_class == "MID":
+            self.protection_pct = 0.3  # حماية أسرع للموجات المتوسطة
+            self.be_pct = 0.2          # نقطة التعادل أسرع
+            self.trail_activation_pct = 0.5  # تفعيل التريل عند 0.5%
+            self.trim_pct = 0.3        # تقليل أكبر في الترام
+        else:  # LARGE
+            self.protection_pct = 0.5
+            self.be_pct = 0.3
+            self.trail_activation_pct = 0.8
+            self.trim_pct = 0.2
+    
     def update_state(self, new_state: str, reason: str):
         """تحديث حالة الصفقة مع التسجيل"""
         old_state = self.current_state
@@ -959,382 +910,410 @@ class TradePhaseEngine:
             extra_details={'old_state': old_state, 'new_state': new_state}
         )
     
-    def check_tp_hits(self, current_price: float) -> List[Dict]:
-        """التحقق من ضرب مستويات TP"""
-        tp_hits = []
+    def analyze_structure(self, candles: List[Dict]) -> Dict:
+        """تحليل الهيكل السعري الحالي"""
+        if len(candles) < 10:
+            return {"hh": None, "hl": None, "lh": None, "ll": None, "trend": "UNKNOWN"}
         
-        if not self.tp1_hit and self.trade_plan.take_profit_1:
-            if (self.side == "BUY" and current_price >= self.trade_plan.take_profit_1) or \
-               (self.side == "SELL" and current_price <= self.trade_plan.take_profit_1):
-                self.tp1_hit = True
-                tp_hits.append({'level': 'TP1', 'price': self.trade_plan.take_profit_1})
+        highs = [c['high'] for c in candles[-10:]]
+        lows = [c['low'] for c in candles[-10:]]
+        closes = [c['close'] for c in candles[-10:]]
         
-        if not self.tp2_hit and self.trade_plan.take_profit_2:
-            if (self.side == "BUY" and current_price >= self.trade_plan.take_profit_2) or \
-               (self.side == "SELL" and current_price <= self.trade_plan.take_profit_2):
-                self.tp2_hit = True
-                tp_hits.append({'level': 'TP2', 'price': self.trade_plan.take_profit_2})
+        # التعرف على القمم والقيعان المحلية
+        hh = max(highs[-5:])  # أعلى قمة حديثة
+        ll = min(lows[-5:])   # أقل قاع حديث
         
-        if not self.tp3_hit and self.trade_plan.take_profit_3:
-            if (self.side == "BUY" and current_price >= self.trade_plan.take_profit_3) or \
-               (self.side == "SELL" and current_price <= self.trade_plan.take_profit_3):
-                self.tp3_hit = True
-                tp_hits.append({'level': 'TP3', 'price': self.trade_plan.take_profit_3})
+        # تحديد الهيكل
+        if self.side == "BUY":
+            # في الشراء: نبحث عن Higher Highs و Higher Lows
+            recent_highs = sorted(highs[-5:], reverse=True)[:2]
+            recent_lows = sorted(lows[-5:])[:2]
+            
+            hh = max(recent_highs) if recent_highs else None
+            hl = min(recent_lows) if len(recent_lows) > 1 else recent_lows[0] if recent_lows else None
+            
+            structure_info = {
+                "hh": hh,
+                "hl": hl,
+                "lh": None,
+                "ll": None,
+                "trend": "UP" if closes[-1] > closes[-5] else "CONSOLIDATION"
+            }
+            
+        else:  # SELL
+            # في البيع: نبحث عن Lower Highs و Lower Lows
+            recent_highs = sorted(highs[-5:])[:2]
+            recent_lows = sorted(lows[-5:], reverse=True)[:2]
+            
+            lh = min(recent_highs) if recent_highs else None
+            ll = max(recent_lows) if len(recent_lows) > 1 else recent_lows[0] if recent_lows else None
+            
+            structure_info = {
+                "hh": None,
+                "hl": None,
+                "lh": lh,
+                "ll": ll,
+                "trend": "DOWN" if closes[-1] < closes[-5] else "CONSOLIDATION"
+            }
         
-        return tp_hits
-
-# ============================================
-#  FAIL-FAST LOGIC - نظام قتل الصفقات الغلط
-# ============================================
-
-class FailFastSystem:
-    """نظام Fail-Fast للخروج السريع من الصفقات الفاشلة"""
+        return structure_info
     
-    def __init__(self, logger: ProConsoleLogger):
-        self.logger = logger
-        self.max_trade_time = 3600  # ساعة واحدة كحد أقصى للصفقة
+    def detect_liquidity_event(self, candles: List[Dict]) -> Dict:
+        """كشف أحداث السيولة"""
+        if len(candles) < 3:
+            return {"sweep": False, "tap": False, "type": None}
         
-    def check_fail_fast(self, trade_plan: TradePlan, current_price: float, 
-                       candles: List[Dict], time_in_trade: float) -> Tuple[bool, str]:
-        """
-        التحقق من شروط Fail-Fast
+        current = candles[-1]
+        prev = candles[-2]
         
-        Returns:
-            Tuple[bool, str]: (هل يجب الخروج فوراً, السبب)
-        """
+        # كشف Sweep
+        sweep_up = current['high'] > max([c['high'] for c in candles[-4:-1]]) and current['close'] < prev['close']
+        sweep_down = current['low'] < min([c['low'] for c in candles[-4:-1]]) and current['close'] > prev['close']
+        
+        # كشف Liquidity Tap (تلامس سيولة بدون اختراق)
+        tap_up = abs(current['high'] - max([c['high'] for c in candles[-4:-1]])) < (current['high'] * 0.001)
+        tap_down = abs(current['low'] - min([c['low'] for c in candles[-4:-1]])) < (current['low'] * 0.001)
+        
+        return {
+            "sweep": sweep_up or sweep_down,
+            "tap": tap_up or tap_down,
+            "type": "SWEEP_UP" if sweep_up else ("SWEEP_DOWN" if sweep_down else 
+                    "TAP_UP" if tap_up else ("TAP_DOWN" if tap_down else None))
+        }
+    
+    def should_move_to_protect(self, current_price: float, candles: List[Dict]) -> Tuple[bool, str]:
+        """التحقق من الانتقال لمرحلة الحماية"""
+        if self.current_state != TradeState.ENTRY:
+            return False, "Already in protection or beyond"
+        
+        profit_pct = self.calculate_profit_pct(current_price)
+        
+        # الشرط: ربح حسب نوع الصفقة
+        required_profit = self.protection_pct
+        
+        if profit_pct >= required_profit:
+            structure = self.analyze_structure(candles)
+            
+            if self.side == "BUY" and structure['trend'] == "UP":
+                return True, f"Profit {profit_pct:.2f}% + Uptrend intact"
+            elif self.side == "SELL" and structure['trend'] == "DOWN":
+                return True, f"Profit {profit_pct:.2f}% + Downtrend intact"
+        
+        return False, f"Insufficient profit: {profit_pct:.2f}% (need {required_profit}%)"
+    
+    def should_move_to_breakeven(self, current_price: float, candles: List[Dict]) -> Tuple[bool, str]:
+        """التحقق من الانتقال لنقطة التعادل"""
+        if self.current_state != TradeState.PROTECT:
+            return False, "Not in PROTECT phase"
+        
+        profit_pct = self.calculate_profit_pct(current_price)
+        
+        # الشرط: ربح حسب نوع الصفقة
+        if profit_pct >= self.be_pct:
+            # تحقق من عدم وجود CHoCH ضد الصفقة
+            choch = self.detect_choch(candles)
+            if not choch['against_trade']:
+                return True, f"Profit {profit_pct:.2f}% + No CHoCH against"
+        
+        return False, f"Waiting for BE conditions ({self.be_pct}%)"
+    
+    def should_move_to_trail(self, current_price: float, candles: List[Dict]) -> Tuple[bool, str]:
+        """التحقق من الانتقال لمرحلة التريل"""
+        if self.current_state not in [TradeState.BREAKEVEN, TradeState.TRAIL, TradeState.TRIM]:
+            return False, "Not in BE/TRAIL/TRIM phase"
+        
+        profit_pct = self.calculate_profit_pct(current_price)
+        
+        # الشرط: ربح حسب نوع الصفقة
+        if profit_pct >= self.trail_activation_pct:
+            structure = self.analyze_structure(candles)
+            liq_event = self.detect_liquidity_event(candles)
+            
+            # في الشراء: تأكيد Higher Low جديد
+            if self.side == "BUY" and structure['hl'] and not liq_event['sweep']:
+                if self.last_stop_loss is None or structure['hl'] > self.last_stop_loss:
+                    return True, f"Profit {profit_pct:.2f}% + New HL confirmed"
+            
+            # في البيع: تأكيد Lower High جديد
+            elif self.side == "SELL" and structure['lh'] and not liq_event['sweep']:
+                if self.last_stop_loss is None or structure['lh'] < self.last_stop_loss:
+                    return True, f"Profit {profit_pct:.2f}% + New LH confirmed"
+        
+        return False, f"Trail conditions not met (need {self.trail_activation_pct}%)"
+    
+    def should_trim_position(self, current_price: float, candles: List[Dict]) -> Tuple[bool, str]:
+        """التحقق من الحاجة لتقليل المخاطرة"""
+        if self.current_state not in [TradeState.TRAIL, TradeState.TRIM]:
+            return False, "Not in trail phase"
+        
+        if self.trim_count >= self.max_trims:
+            return False, "Max trims reached"
+        
+        # أسباب الترايم
         reasons = []
         
-        # 1. ضرب مستوى الإبطال
-        if trade_plan.invalidation:
-            if (trade_plan.side == "BUY" and current_price <= trade_plan.invalidation) or \
-               (trade_plan.side == "SELL" and current_price >= trade_plan.invalidation):
-                reasons.append("FAIL FAST — Invalidation hit")
+        # 1. Wick قوي ضد الاتجاه
+        current_candle = candles[-1]
+        candle_range = current_candle['high'] - current_candle['low']
         
-        # 2. وقت الصفقة طويل بدون تقدم
-        if time_in_trade > self.max_trade_time:
-            profit_pct = self.calculate_profit_pct(trade_plan.side, trade_plan.entry_price, current_price)
-            if abs(profit_pct) < 0.5:  # أقل من 0.5% ربح/خسارة
-                reasons.append("FAIL FAST — Stuck trade (no progress)")
+        if self.side == "BUY":
+            upper_wick = current_candle['high'] - max(current_candle['close'], current_candle['open'])
+            if upper_wick > candle_range * 0.6:  # wick كبير
+                reasons.append("Strong upper wick against")
+        else:
+            lower_wick = min(current_candle['close'], current_candle['open']) - current_candle['low']
+            if lower_wick > candle_range * 0.6:  # wick كبير
+                reasons.append("Strong lower wick against")
         
-        # 3. Fake Breakout (اختراق كاذب)
-        if self.detect_fake_breakout(candles, trade_plan.side):
-            reasons.append("FAIL FAST — Fake breakout detected")
+        # 2. ضعف الحجم
+        if len(candles) >= 3:
+            current_volume = current_candle['volume']
+            avg_volume = sum(c['volume'] for c in candles[-4:-1]) / 3
+            if current_volume < avg_volume * 0.7:
+                reasons.append("Weak volume")
         
-        # 4. إشارة عكسية قوية
-        if self.detect_strong_reversal(candles, trade_plan.side):
-            reasons.append("FAIL FAST — Strong reversal signal")
-        
-        # 5. اختراق هيكل ضد الصفقة
-        if self.detect_structure_break(candles, trade_plan.side):
-            reasons.append("FAIL FAST — Structure broken against trade")
+        # 3. Liquidity Tap جانبي
+        liq_event = self.detect_liquidity_event(candles)
+        if liq_event['tap']:
+            reasons.append("Liquidity tap detected")
         
         if reasons:
             return True, " | ".join(reasons)
         
-        return False, ""
+        return False, "No trim signals"
     
-    def calculate_profit_pct(self, side: str, entry_price: float, current_price: float) -> float:
-        """حساب نسبة الربح/الخسارة"""
-        if side == "BUY":
-            return ((current_price - entry_price) / entry_price) * 100
+    def should_exit_trade(self, current_price: float, candles: List[Dict]) -> Tuple[bool, str]:
+        """التحقق من الحاجة للخروج الكامل"""
+        # 1. CHoCH ضد الصفقة
+        choch = self.detect_choch(candles)
+        if choch['against_trade'] and choch['confirmed']:
+            return True, f"Confirmed CHoCH against trade"
+        
+        # 2. كسر الهيكل الداعم
+        structure = self.analyze_structure(candles)
+        profit_pct = self.calculate_profit_pct(current_price)
+        
+        if self.side == "BUY":
+            if structure['trend'] == "DOWN" and profit_pct > 0:
+                return True, "Structure broken to downside"
         else:
-            return ((entry_price - current_price) / entry_price) * 100
+            if structure['trend'] == "UP" and profit_pct > 0:
+                return True, "Structure broken to upside"
+        
+        # 3. إغلاق شمعة ضد الاتجاه بقوة
+        current_candle = candles[-1]
+        if self.side == "BUY":
+            if current_candle['close'] < current_candle['open'] and (current_candle['open'] - current_candle['close']) > (current_candle['high'] - current_candle['low']) * 0.7:
+                return True, "Strong bearish candle"
+        else:
+            if current_candle['close'] > current_candle['open'] and (current_candle['close'] - current_candle['open']) > (current_candle['high'] - current_candle['low']) * 0.7:
+                return True, "Strong bullish candle"
+        
+        return False, "Trade still valid"
     
-    def detect_fake_breakout(self, candles: List[Dict], side: str) -> bool:
+    def detect_choch(self, candles: List[Dict]) -> Dict:
+        """كشف Change of Character"""
+        if len(candles) < 6:
+            return {"detected": False, "against_trade": False, "confirmed": False}
+        
+        # تحليل بسيط لـ CHoCH
+        recent_closes = [c['close'] for c in candles[-6:]]
+        
+        if self.side == "BUY":
+            # في الشراء: CHoCH هابط عندما يكسر آخر Low
+            recent_lows = [c['low'] for c in candles[-6:-1]]
+            last_low = min(recent_lows) if recent_lows else None
+            
+            if last_low and candles[-1]['close'] < last_low:
+                # تأكيد: شمعتين إغلاق تحت last_low
+                if len(candles) >= 8 and candles[-2]['close'] < last_low:
+                    return {"detected": True, "against_trade": True, "confirmed": True}
+                return {"detected": True, "against_trade": True, "confirmed": False}
+        
+        else:  # SELL
+            # في البيع: CHoCH صاعد عندما يكسر آخر High
+            recent_highs = [c['high'] for c in candles[-6:-1]]
+            last_high = max(recent_highs) if recent_highs else None
+            
+            if last_high and candles[-1]['close'] > last_high:
+                # تأكيد: شمعتين إغلاق فوق last_high
+                if len(candles) >= 8 and candles[-2]['close'] > last_high:
+                    return {"detected": True, "against_trade": True, "confirmed": True}
+                return {"detected": True, "against_trade": True, "confirmed": False}
+        
+        return {"detected": False, "against_trade": False, "confirmed": False}
+    
+    def calculate_profit_pct(self, current_price: float) -> float:
+        """حساب نسبة الربح/الخسارة"""
+        if self.side == "BUY":
+            return ((current_price - self.entry_price) / self.entry_price) * 100
+        else:
+            return ((self.entry_price - current_price) / self.entry_price) * 100
+    
+    def calculate_stop_loss(self, current_price: float, candles: List[Dict]) -> Tuple[float, str]:
+        """حساب وقف الخسارة الحالي"""
+        structure = self.analyze_structure(candles)
+        reason = ""
+        
+        if self.current_state == TradeState.ENTRY:
+            # في الدخول: استخدام SL من خطة الصفقة
+            sl = self.trade_plan.sl
+            reason = "From trade plan"
+                
+        elif self.current_state == TradeState.PROTECT:
+            # حماية: حسب نوع الصفقة
+            if self.side == "BUY":
+                sl = self.entry_price * (1 - (self.protection_pct - 0.1) / 100)
+                reason = "Protection phase"
+            else:
+                sl = self.entry_price * (1 + (self.protection_pct - 0.1) / 100)
+                reason = "Protection phase"
+                
+        elif self.current_state == TradeState.BREAKEVEN:
+            # نقطة التعادل
+            sl = self.entry_price
+            reason = "Breakeven activated"
+            
+        elif self.current_state == TradeState.TRAIL:
+            # تريل بالهيكل
+            if self.side == "BUY" and structure['hl']:
+                sl = structure['hl'] * 0.998  # تحت الـ HL قليلاً
+                reason = f"Trailing below HL: {structure['hl']:.4f}"
+            elif self.side == "SELL" and structure['lh']:
+                sl = structure['lh'] * 1.002  # فوق الـ LH قليلاً
+                reason = f"Trailing above LH: {structure['lh']:.4f}"
+            else:
+                # إذا لم يتكون هيكل بعد
+                sl = self.entry_price
+                reason = "No structure yet, at breakeven"
+                
+        elif self.current_state == TradeState.TRIM:
+            # بعد الترام: وقف أكثر تحفظاً
+            if self.last_stop_loss:
+                sl = self.last_stop_loss
+                reason = "Maintaining SL after trim"
+            else:
+                sl = self.entry_price
+                reason = "Breakeven after trim"
+        else:
+            sl = current_price  # في حالة EXIT
+            reason = "Exit phase"
+        
+        self.last_stop_loss = sl
+        return sl, reason
+    
+    def get_trade_summary(self) -> Dict:
+        """ملخص حالة الصفقة"""
+        return {
+            'current_state': self.current_state,
+            'state_duration': time.time() - self.state_changed_at,
+            'trim_count': self.trim_count,
+            'state_history': self.state_log[-5:],  # آخر 5 تغييرات
+            'last_stop_loss': self.last_stop_loss,
+            'entry_price': self.entry_price,
+            'side': self.side,
+            'trend_class': self.trade_plan.trend_class,
+            'targets_hit': self.targets_hit,
+            'current_profit_pct': self.calculate_profit_pct(self.last_stop_loss if self.last_stop_loss else self.entry_price)
+        }
+
+# ============================================
+#  MARKET INTELLIGENCE - ذكاء السوق
+# ============================================
+
+class MarketIntelligence:
+    """ذكاء السوق - تحليل السيولة والهيكل"""
+    
+    def __init__(self, logger: ProConsoleLogger):
+        self.logger = logger
+        
+    def detect_liquidity_zones(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """كشف مناطق السيولة"""
+        if len(df) < 20:
+            return {"highs": [], "lows": [], "equal_highs": [], "equal_lows": []}
+        
+        highs = df['high'].values
+        lows = df['low'].values
+        
+        # كشف القمم والقيعان المتساوية
+        equal_highs = []
+        equal_lows = []
+        
+        for i in range(2, len(highs) - 2):
+            # قمم متساوية (فارق أقل من 0.1%)
+            if abs(highs[i] - highs[i-1]) / highs[i] < 0.001:
+                equal_highs.append(highs[i])
+            # قيعان متساوية
+            if abs(lows[i] - lows[i-1]) / lows[i] < 0.001:
+                equal_lows.append(lows[i])
+        
+        # مناطق السيولة الرئيسية
+        liquidity_highs = sorted(set(equal_highs[-5:])) if equal_highs else []
+        liquidity_lows = sorted(set(equal_lows[-5:])) if equal_lows else []
+        
+        return {
+            "highs": liquidity_highs,
+            "lows": liquidity_lows,
+            "equal_highs": equal_highs[-3:] if equal_highs else [],
+            "equal_lows": equal_lows[-3:] if equal_lows else [],
+            "major_high": max(highs[-10:]) if len(highs) >= 10 else None,
+            "major_low": min(lows[-10:]) if len(lows) >= 10 else None
+        }
+    
+    def analyze_structure_break(self, df: pd.DataFrame, side: str) -> Dict[str, Any]:
+        """تحليل كسر الهيكل"""
+        if len(df) < 10:
+            return {"broken": False, "level": None, "type": None}
+        
+        highs = df['high'].values
+        lows = df['low'].values
+        closes = df['close'].values
+        
+        # آخر 5 شمعات
+        recent_highs = highs[-5:]
+        recent_lows = lows[-5:]
+        
+        if side == "BUY":
+            # في الشراء: نبحث عن كسر قمة (BOS)
+            prev_high = max(highs[-10:-5]) if len(highs) >= 10 else max(highs[:-5])
+            if max(recent_highs) > prev_high:
+                return {
+                    "broken": True,
+                    "level": prev_high,
+                    "type": "BOS_UP",
+                    "current_high": max(recent_highs)
+                }
+        else:  # SELL
+            # في البيع: نبحث عن كسر قاع (BOS)
+            prev_low = min(lows[-10:-5]) if len(lows) >= 10 else min(lows[:-5])
+            if min(recent_lows) < prev_low:
+                return {
+                    "broken": True,
+                    "level": prev_low,
+                    "type": "BOS_DOWN",
+                    "current_low": min(recent_lows)
+                }
+        
+        return {"broken": False, "level": None, "type": None}
+    
+    def detect_fake_breakout(self, df: pd.DataFrame, side: str) -> bool:
         """كشف الاختراق الكاذب"""
-        if len(candles) < 3:
+        if len(df) < 3:
             return False
         
-        current = candles[-1]
-        prev = candles[-2]
+        current = df.iloc[-1]
+        prev = df.iloc[-2]
         
         if side == "BUY":
-            # اختراق كاذب صاعد: شمعة تخترق للأعلى ثم تغلق تحت
-            if current['high'] > max([c['high'] for c in candles[-4:-1]]) and current['close'] < prev['close']:
-                # حجم كبير على الشمعة الحالية
-                if current['volume'] > sum([c['volume'] for c in candles[-4:-1]]) / 3 * 1.5:
-                    return True
+            # اختراق صاعد كاذب: شمعة تفتح وتغلق تحت مستوى المقاومة
+            if current['high'] > prev['high'] and current['close'] < prev['close']:
+                return True
         else:  # SELL
-            # اختراق كاذب هابط: شمعة تخترق للأسفل ثم تغلق فوق
-            if current['low'] < min([c['low'] for c in candles[-4:-1]]) and current['close'] > prev['close']:
-                # حجم كبير على الشمعة الحالية
-                if current['volume'] > sum([c['volume'] for c in candles[-4:-1]]) / 3 * 1.5:
-                    return True
+            # اختراق هابط كاذب: شمعة تفتح وتغلق فوق مستوى الدعم
+            if current['low'] < prev['low'] and current['close'] > prev['close']:
+                return True
         
         return False
-    
-    def detect_strong_reversal(self, candles: List[Dict], side: str) -> bool:
-        """كشف إشارة انعكاس قوية"""
-        if len(candles) < 3:
-            return False
-        
-        current = candles[-1]
-        prev = candles[-2]
-        
-        if side == "BUY":
-            # شمعة هابطة قوية بعد صعود
-            if current['close'] < current['open'] and \
-               (current['open'] - current['close']) > (current['high'] - current['low']) * 0.7:
-                # حجم كبير
-                if current['volume'] > prev['volume'] * 1.3:
-                    return True
-        else:  # SELL
-            # شمعة صاعدة قوية بعد هبوط
-            if current['close'] > current['open'] and \
-               (current['close'] - current['open']) > (current['high'] - current['low']) * 0.7:
-                # حجم كبير
-                if current['volume'] > prev['volume'] * 1.3:
-                    return True
-        
-        return False
-    
-    def detect_structure_break(self, candles: List[Dict], side: str) -> bool:
-        """كشف كسر الهيكل ضد الصفقة"""
-        if len(candles) < 10:
-            return False
-        
-        # البحث عن swing points
-        highs = [c['high'] for c in candles[-10:]]
-        lows = [c['low'] for c in candles[-10:]]
-        
-        if side == "BUY":
-            # في الشراء: كسر آخر قاع مهم
-            recent_lows = sorted(lows[-5:])
-            if len(recent_lows) >= 2:
-                last_swing_low = recent_lows[0]
-                if candles[-1]['close'] < last_swing_low:
-                    return True
-        else:  # SELL
-            # في البيع: كسر آخر قمة مهمة
-            recent_highs = sorted(highs[-5:], reverse=True)
-            if len(recent_highs) >= 2:
-                last_swing_high = recent_highs[0]
-                if candles[-1]['close'] > last_swing_high:
-                    return True
-        
-        return False
-
-# ============================================
-#  TRADE PLAN BUILDER - بناء خطط التداول
-# ============================================
-
-class TradePlanBuilder:
-    """بناء خطط التداول الذكية"""
-    
-    def __init__(self, logger: ProConsoleLogger):
-        self.logger = logger
-    
-    def build_trade_plan(self, market_data: Dict) -> Optional[TradePlan]:
-        """
-        بناء خطة تداول بناءً على تحليل السوق
-        
-        Args:
-            market_data: بيانات تحليل السوق
-            
-        Returns:
-            TradePlan or None إذا فشل البناء
-        """
-        try:
-            # استخراج البيانات الأساسية
-            signal = market_data.get('signal', None)
-            trend_class = market_data.get('trend_class', 'MID')
-            
-            if not signal:
-                return None
-            
-            # إنشاء الخطة الأساسية
-            plan = TradePlan(side=signal, trend_class=trend_class)
-            
-            # تعيين أسباب الدخول
-            plan.entry_reason = {
-                "liquidity": market_data.get('liquidity_event', 'UNKNOWN'),
-                "structure": market_data.get('structure_event', 'UNKNOWN'),
-                "zone": market_data.get('zone_type', 'UNKNOWN'),
-                "confirmation": market_data.get('confirmation_type', 'UNKNOWN')
-            }
-            
-            # التحقق من أسباب الدخول الأساسية
-            if not plan.entry_reason['liquidity'] or not plan.entry_reason['zone']:
-                self.logger.log_blocked_entry(
-                    "Weak location / no liquidity",
-                    plan.entry_reason
-                )
-                return None
-            
-            # تعيين مستويات الإبطال
-            plan.invalidation = market_data.get('structure_invalid_level', None)
-            if not plan.invalidation:
-                self.logger.log_blocked_entry(
-                    "No invalidation level defined",
-                    plan.entry_reason
-                )
-                return None
-            
-            # تعيين وقف الخسارة
-            plan.stop_loss = plan.invalidation
-            
-            # تعيين الأهداف بناءً على السيولة
-            plan.take_profit_1 = market_data.get('internal_liquidity', None)
-            plan.take_profit_2 = market_data.get('external_liquidity', None)
-            
-            if trend_class == "LARGE":
-                plan.take_profit_3 = market_data.get('htf_liquidity', None)
-            
-            # التحقق من وجود أهداف
-            if not plan.take_profit_1:
-                self.logger.log_blocked_entry(
-                    "No take profit levels defined",
-                    plan.entry_reason
-                )
-                return None
-            
-            # تعيين إدارة الصفقة
-            plan.trailing_mode = "STRUCTURE"
-            plan.breakeven_rule = "AFTER_TP1"
-            plan.partial_exit_pct = 0.3
-            
-            # حساب نسبة المخاطرة/العائد
-            rr_ratio = plan.calculate_risk_reward(market_data.get('current_price', 0))
-            
-            # التحقق من نسبة المخاطرة/العائد
-            if rr_ratio < 1.5:
-                self.logger.log_blocked_entry(
-                    f"Poor risk/reward ratio: 1:{rr_ratio:.2f}",
-                    {
-                        'RR_Ratio': f"1:{rr_ratio:.2f}",
-                        'Min_Required': "1:1.5"
-                    }
-                )
-                return None
-            
-            # تعليم الخطة كصالحة
-            plan.valid = True
-            plan.reason = f"Plan built based on {plan.entry_reason['structure']} at {plan.entry_reason['zone']} zone"
-            
-            # تسجيل الخطة
-            plan_summary = plan.get_plan_summary()
-            plan_summary['rr_ratio'] = rr_ratio
-            self.logger.log_plan(plan_summary, "ENTRY PLAN APPROVED")
-            
-            return plan
-            
-        except Exception as e:
-            self.logger.log_error(f"Failed to build trade plan: {str(e)}", e, "TradePlanBuilder")
-            return None
-
-# ============================================
-#  SMART EXIT ENGINE - محرك الخروج الذكي
-# ============================================
-
-class SmartExitEngine:
-    """محرك الخروج الذكي (Structure + Liquidity)"""
-    
-    def __init__(self, logger: ProConsoleLogger):
-        self.logger = logger
-        self.fail_fast_system = FailFastSystem(logger)
-    
-    def manage_trade_exits(self, trade_plan: TradePlan, trade_phase_engine: TradePhaseEngine,
-                          current_price: float, candles: List[Dict], 
-                          time_in_trade: float) -> List[Dict]:
-        """
-        إدارة عمليات الخروج من الصفقة
-        
-        Returns:
-            List[Dict]: قائمة بأحداث الخروج التي تمت
-        """
-        exit_events = []
-        
-        # === FAIL-FAST CHECK ===
-        should_fail_fast, fail_fast_reason = self.fail_fast_system.check_fail_fast(
-            trade_plan, current_price, candles, time_in_trade
-        )
-        
-        if should_fail_fast:
-            exit_events.append({
-                'type': 'FAIL_FAST',
-                'reason': fail_fast_reason,
-                'price': current_price,
-                'partial': False
-            })
-            return exit_events
-        
-        # === CHECK TP HITS ===
-        tp_hits = trade_phase_engine.check_tp_hits(current_price)
-        
-        for tp_hit in tp_hits:
-            exit_events.append({
-                'type': 'TAKE_PROFIT',
-                'level': tp_hit['level'],
-                'price': tp_hit['price'],
-                'partial': True if tp_hit['level'] in ['TP1', 'TP2'] else False
-            })
-        
-        # === STRUCTURE BREAK CHECK ===
-        if self._check_structure_break(candles, trade_plan.side):
-            exit_events.append({
-                'type': 'STRUCTURE_BREAK',
-                'reason': "Structure broken against trade direction",
-                'price': current_price,
-                'partial': False
-            })
-        
-        # === LIQUIDITY TARGET REACHED ===
-        if trade_plan.take_profit_3 and \
-           ((trade_plan.side == "BUY" and current_price >= trade_plan.take_profit_3) or \
-            (trade_plan.side == "SELL" and current_price <= trade_plan.take_profit_3)):
-            exit_events.append({
-                'type': 'FINAL_TARGET',
-                'reason': "Final liquidity target reached",
-                'price': current_price,
-                'partial': False
-            })
-        
-        return exit_events
-    
-    def _check_structure_break(self, candles: List[Dict], side: str) -> bool:
-        """التحقق من كسر الهيكل"""
-        if len(candles) < 5:
-            return False
-        
-        # تحليل الهيكل الحالي
-        highs = [c['high'] for c in candles[-5:]]
-        lows = [c['low'] for c in candles[-5:]]
-        closes = [c['close'] for c in candles[-5:]]
-        
-        if side == "BUY":
-            # في الشراء: نبحث عن Lower Low
-            if len(candles) >= 3:
-                current_low = lows[-1]
-                prev_low = lows[-2]
-                if current_low < prev_low and closes[-1] < closes[-2]:
-                    return True
-        else:  # SELL
-            # في البيع: نبحث عن Higher High
-            if len(candles) >= 3:
-                current_high = highs[-1]
-                prev_high = highs[-2]
-                if current_high > prev_high and closes[-1] > closes[-2]:
-                    return True
-        
-        return False
-    
-    def calculate_partial_exit_size(self, trade_plan: TradePlan, exit_event: Dict) -> float:
-        """حساب حجم الخروج الجزئي"""
-        if exit_event['type'] == 'TAKE_PROFIT':
-            if exit_event['level'] == 'TP1':
-                return trade_plan.partial_exit_pct  # 30%
-            elif exit_event['level'] == 'TP2':
-                return 0.3  # 30% إضافية
-            elif exit_event['level'] == 'TP3':
-                return 1.0  # 100% (خروج كامل)
-        
-        elif exit_event['type'] == 'FINAL_TARGET':
-            return 1.0  # خروج كامل
-        
-        elif exit_event['type'] in ['FAIL_FAST', 'STRUCTURE_BREAK']:
-            return 1.0  # خروج كامل
-        
-        return 0.0  # لا خروج
 
 # ============================================
 #  EXECUTION GUARD - حماية التنفيذ
@@ -1429,11 +1408,11 @@ class ExecutionGuard:
         )
 
 # ============================================
-#  SMART TRADE MANAGER - المدير الرئيسي (محدث)
+#  SMART TRADE MANAGER - المدير الرئيسي مع نظام Plan
 # ============================================
 
 class SmartTradeManager:
-    """المدير الذكي للصفقات (محدث مع TradePlan)"""
+    """المدير الذكي للصفقات مع نظام TradePlan"""
     
     def __init__(self, exchange, symbol: str, risk_percent: float = 0.6, logger: ProConsoleLogger = None):
         self.exchange = exchange
@@ -1443,19 +1422,16 @@ class SmartTradeManager:
         
         # الأنظمة الفرعية
         self.execution_guard = ExecutionGuard(exchange, self.logger)
-        self.trade_plan_builder = TradePlanBuilder(self.logger)
-        self.smart_exit_engine = SmartExitEngine(self.logger)
         self.trade_phase_engine = None
-        self.current_trade_plan = None
+        self.market_intelligence = MarketIntelligence(self.logger)
         
-        # حالة التداول
         self.active_trade = False
         self.current_position = {
             'side': None,
             'entry_price': 0.0,
             'quantity': 0.0,
             'entry_time': None,
-            'remaining_qty': 0.0
+            'plan': None
         }
         
         # إحصائيات
@@ -1463,137 +1439,32 @@ class SmartTradeManager:
         self.total_pnl = 0.0
         self.total_trades = 0
         self.winning_trades = 0
-        self.fail_fast_exits = 0
-    
-    def open_trade_with_plan(self, trade_plan: TradePlan, balance: float, 
-                            current_price: float) -> bool:
-        """فتح صفقة بناءً على خطة محددة"""
         
-        # التحقق من عدم وجود صفقة نشطة
-        if self.active_trade:
-            self.logger.log_error("Cannot open trade: Active trade exists", context="Trade Opening")
-            return False
+    def calculate_position_size(self, balance: float, entry_price: float, plan: TradePlan) -> float:
+        """حساب حجم المركز الذكي مع مراعاة خطة الصفقة"""
+        # رأس المال المستخدم
+        risk_capital = balance * self.risk_percent
         
-        # التحقق من صلاحية الخطة
-        if not trade_plan or not trade_plan.is_valid():
-            self.logger.log_error("Cannot open trade: Invalid trade plan", context="Trade Opening")
-            return False
+        # تعديل حسب نوع الصفقة
+        if plan.trend_class == "LARGE":
+            risk_multiplier = 1.2
+            confidence_level = "LARGE_TREND"
+        else:  # MID
+            risk_multiplier = 1.0
+            confidence_level = "MID_TREND"
         
-        # التحقق من صلاحية التنفيذ
-        allow, allow_reason = self.execution_guard.should_allow_order()
-        if not allow:
-            self.logger.log_system(f"Order not allowed: {allow_reason}", "WARNING")
-            return False
-        
-        # حساب حجم المركز
-        qty = self.calculate_position_size(balance, current_price, trade_plan)
-        if qty <= 0:
-            return False
-        
-        # تعيين سعر الدخول في الخطة
-        trade_plan.entry_price = current_price
-        
-        # تنفيذ الأمر (أو محاكاة)
-        success = self.execute_order(trade_plan.side, qty, current_price, is_open=True)
-        
-        if success:
-            # حفظ الخطة الحالية
-            self.current_trade_plan = trade_plan
-            
-            # تحديث المركز الحالي
-            self.current_position = {
-                'side': trade_plan.side,
-                'entry_price': current_price,
-                'quantity': qty,
-                'remaining_qty': qty,
-                'entry_time': datetime.now(),
-                'zone': trade_plan.entry_reason.get('zone', 'UNKNOWN'),
-                'confidence': trade_plan.calculate_risk_reward(current_price) / 10  # ثقة بناءً على RR
-            }
-            
-            # تهيئة نظام إدارة المراحل
-            self.trade_phase_engine = TradePhaseEngine(trade_plan, current_price, self.logger)
-            self.active_trade = True
-            
-            # تسجيل الصفقة
-            trade_record = {
-                'id': len(self.trades_history) + 1,
-                'timestamp': datetime.now().isoformat(),
-                'side': trade_plan.side,
-                'entry_price': current_price,
-                'qty': qty,
-                'zone': trade_plan.entry_reason.get('zone', 'UNKNOWN'),
-                'reason': trade_plan.reason,
-                'plan': trade_plan.get_plan_summary(),
-                'position_value': qty * current_price
-            }
-            self.trades_history.append(trade_record)
-            
-            # لوج الدخول
-            self.logger.log_entry(
-                side=trade_plan.side,
-                zone_type=trade_plan.entry_reason.get('zone', 'UNKNOWN'),
-                candle_pattern=trade_plan.entry_reason.get('confirmation', 'Signal'),
-                confidence=min(trade_plan.calculate_risk_reward(current_price) / 10, 0.95),
-                reason=trade_plan.reason,
-                entry_price=current_price
-            )
-            
-            # لوج تفاصيل التنفيذ
-            self.logger.log_execution(
-                price=current_price,
-                quantity=qty,
-                stop_loss=trade_plan.stop_loss,
-                sl_reason=f"Invalidation level: {trade_plan.invalidation}",
-                order_type="MARKET",
-                exchange=self.exchange.name.upper(),
-                position_value=qty * current_price
-            )
-            
-            self.logger.log_system(
-                f"Trade opened with plan | {trade_plan.side.upper()} @ {current_price:.4f} | Qty: {qty:.4f}",
-                "SUCCESS",
-                {
-                    "Entry_Price": f"{current_price:.4f}",
-                    "Quantity": f"{qty:.4f}",
-                    "Zone": trade_plan.entry_reason.get('zone', 'UNKNOWN'),
-                    "RR_Ratio": f"1:{trade_plan.calculate_risk_reward(current_price):.2f}"
-                }
-            )
-            
-            return True
-        
-        return False
-    
-    def calculate_position_size(self, balance: float, entry_price: float, 
-                               trade_plan: TradePlan) -> float:
-        """حساب حجم المركز الذكي بناءً على الخطة"""
-        if not trade_plan or not trade_plan.stop_loss:
-            return 0.0
-        
-        # حساب المخاطرة بالدولار
-        risk_amount = balance * self.risk_percent
-        
-        # حساب المسافة بين الدخول ووقف الخسارة
-        if trade_plan.side == "BUY":
-            risk_distance = entry_price - trade_plan.stop_loss
-        else:  # SELL
-            risk_distance = trade_plan.stop_loss - entry_price
-        
-        if risk_distance <= 0:
-            self.logger.log_error("Invalid risk distance (SL >= Entry for BUY or SL <= Entry for SELL)")
-            return 0.0
-        
-        # حساب الكمية بناءً على المخاطرة
-        raw_qty = risk_amount / risk_distance
-        
-        # تعديل حسب نوع الاتجاه
-        if trade_plan.trend_class == "LARGE":
-            raw_qty *= 1.2  # زيادة 20% للاتجاهات الكبيرة
-        elif trade_plan.trend_class == "MID":
-            raw_qty *= 1.0  # نفس الحجم للاتجاهات المتوسطة
+        # تعديل حسب نسبة العائد المتوقعة
+        if plan.rr_expected >= 3:
+            rr_multiplier = 1.3
+        elif plan.rr_expected >= 2:
+            rr_multiplier = 1.1
         else:
-            raw_qty *= 0.7  # تقليل 30% للاتجاهات الصغيرة
+            rr_multiplier = 0.8
+        
+        adjusted_capital = risk_capital * risk_multiplier * rr_multiplier
+        
+        # حساب الكمية
+        raw_qty = adjusted_capital / entry_price
         
         # تنقية الكمية
         sanitized_qty, status = self.execution_guard.sanitize_order(self.symbol, raw_qty)
@@ -1604,58 +1475,201 @@ class SmartTradeManager:
         
         self.logger.log_debug(
             f"Position Calculation | "
-            f"Risk: ${risk_amount:.2f} | "
-            f"Distance: {risk_distance:.6f} | "
             f"Raw: {raw_qty:.4f} | "
             f"Sanitized: {sanitized_qty:.4f} | "
-            f"Trend Class: {trade_plan.trend_class}"
+            f"Capital: ${adjusted_capital:.2f} | "
+            f"Trend: {confidence_level} | "
+            f"RR: 1:{plan.rr_expected:.1f}"
         )
         
         return sanitized_qty
     
-    def manage_trade_with_plan(self, current_price: float, candles: List[Dict]):
-        """إدارة الصفقة النشطة باستخدام الخطة"""
-        if not self.active_trade or not self.trade_phase_engine or not self.current_trade_plan:
+    def build_trade_plan(self, side: str, current_price: float, market_analysis: Dict, 
+                        df: pd.DataFrame) -> Optional[TradePlan]:
+        """
+        بناء خطة الصفقة قبل الدخول
+        
+        Args:
+            side: اتجاه الصفقة (BUY/SELL)
+            current_price: السعر الحالي
+            market_analysis: تحليل السوق
+            df: بيانات الشموع
+            
+        Returns:
+            TradePlan أو None إذا لم يمكن بناء خطة
+        """
+        # إنشاء خطة الصفقة
+        trend = market_analysis.get('trend', {})
+        structure = market_analysis.get('structure', {})
+        
+        # تحديد فئة الترند
+        trend_strength = trend.get('strength', 0)
+        structure_type = structure.get('type', '')
+        
+        if trend_strength > 2.0 and structure_type.startswith('BOS'):
+            trend_class = "LARGE"
+        else:
+            trend_class = "MID"
+        
+        plan = TradePlan(side=side, trend_class=trend_class)
+        
+        # تحديد أسباب الدخول
+        candles = convert_candles_to_dicts(df)
+        
+        # 1. حدث السيولة
+        liquidity_event = self._detect_liquidity_event(candles)
+        plan.entry_reason["liquidity"] = liquidity_event.get('type')
+        
+        # 2. نوع المنطقة
+        zone_type = self._determine_zone_type(side, structure, current_price, df)
+        plan.entry_reason["zone"] = zone_type
+        
+        # 3. الهيكل
+        plan.entry_reason["structure"] = structure.get('type')
+        
+        # 4. تأكيد الدخول
+        confirmation = self._detect_confirmation(side, candles)
+        plan.entry_reason["confirmation"] = confirmation
+        
+        # مستوى الإبطال
+        invalidation_price, invalidation_reason = self._calculate_invalidation(side, structure, candles)
+        plan.invalidation = invalidation_price
+        plan.invalidation_reason = invalidation_reason
+        
+        # وقف الخسارة
+        sl_price, sl_reason = self._calculate_stop_loss(side, structure, current_price, candles)
+        plan.sl = sl_price
+        
+        # أهداف السيولة
+        liquidity_zones = self.market_intelligence.detect_liquidity_zones(df)
+        tp1, tp2, tp3 = self._calculate_liquidity_targets(side, current_price, liquidity_zones, trend_class)
+        plan.tp1 = tp1
+        plan.tp2 = tp2
+        plan.tp3 = tp3 if trend_class == "LARGE" else None
+        
+        # نسبة المخاطرة والعائد المتوقعة
+        plan.rr_expected = plan.calculate_rr_expected(current_price)
+        
+        # التحقق من صلاحية الخطة
+        if plan.is_valid():
+            self._log_trade_plan(plan, current_price)
+            return plan
+        else:
+            self.logger.log_system(
+                f"Trade plan rejected: {plan.reason}",
+                "WARNING",
+                {"side": side, "trend_class": trend_class}
+            )
+            return None
+    
+    def open_trade_with_plan(self, plan: TradePlan, current_price: float, balance: float, 
+                            reason: str = "") -> bool:
+        """فتح صفقة جديدة مع خطة"""
+        
+        # التحقق من عدم وجود صفقة نشطة
+        if self.active_trade:
+            self.logger.log_error("Cannot open trade: Active trade exists", context="Trade Opening")
+            return False
+        
+        # التحقق من صلاحية التنفيذ
+        allow, allow_reason = self.execution_guard.should_allow_order()
+        if not allow:
+            self.logger.log_system(f"Order not allowed: {allow_reason}", "WARNING")
+            return False
+        
+        # حساب حجم المركز بناءً على خطة المخاطرة
+        qty = self.calculate_position_size(balance, current_price, plan)
+        if qty <= 0:
+            return False
+        
+        # حساب قيمة المركز
+        position_value = qty * current_price
+        
+        # تنفيذ الأمر
+        success = self.execute_order(plan.side.lower(), qty, current_price, is_open=True)
+        
+        if success:
+            # تحديث المركز الحالي
+            self.current_position = {
+                'side': plan.side,
+                'entry_price': current_price,
+                'quantity': qty,
+                'entry_time': datetime.now(),
+                'plan': plan,
+                'reason': reason
+            }
+            
+            # تهيئة نظام إدارة المراحل مع خطة الصفقة
+            self.trade_phase_engine = TradePhaseEngine(current_price, plan.side, plan, self.logger)
+            self.active_trade = True
+            
+            # تسجيل الصفقة
+            trade_record = {
+                'id': len(self.trades_history) + 1,
+                'timestamp': datetime.now().isoformat(),
+                'side': plan.side,
+                'entry_price': current_price,
+                'qty': qty,
+                'plan': plan.get_summary(),
+                'reason': reason,
+                'position_value': position_value
+            }
+            self.trades_history.append(trade_record)
+            
+            # لوج الدخول
+            self.logger.log_entry(
+                side=plan.side,
+                zone_type=plan.entry_reason.get('zone', 'UNKNOWN'),
+                candle_pattern=plan.entry_reason.get('confirmation', 'Signal'),
+                confidence=min(plan.rr_expected / 3, 0.95),
+                reason=reason,
+                entry_price=current_price
+            )
+            
+            self.logger.log_execution(
+                price=current_price,
+                quantity=qty,
+                stop_loss=plan.sl,
+                sl_reason=f"From trade plan | Invalidation: {plan.invalidation:.4f}",
+                order_type="MARKET",
+                exchange=self.exchange.name.upper(),
+                position_value=position_value
+            )
+            
+            self.logger.log_system(
+                f"Trade opened with plan | {plan.side} @ {current_price:.4f} | RR: 1:{plan.rr_expected:.1f}",
+                "SUCCESS",
+                {
+                    "Trend_Class": plan.trend_class,
+                    "Liquidity_Event": plan.entry_reason.get('liquidity'),
+                    "Structure": plan.entry_reason.get('structure')
+                }
+            )
+            
+            return True
+        
+        return False
+    
+    def manage_trade_with_plan(self, current_price: float, df: pd.DataFrame):
+        """إدارة الصفقة النشطة مع خطة"""
+        if not self.active_trade or self.trade_phase_engine is None:
             return
         
-        # حساب وقت الصفقة
-        time_in_trade = time.time() - self.trade_phase_engine.state_changed_at
+        plan = self.current_position['plan']
+        candles = convert_candles_to_dicts(df)
         
-        # إدارة الخروجات باستخدام SmartExitEngine
-        exit_events = self.smart_exit_engine.manage_trade_exits(
-            self.current_trade_plan,
-            self.trade_phase_engine,
-            current_price,
-            candles,
-            time_in_trade
-        )
+        # فحص الإبطال السريع (Fail Fast)
+        if self._should_fail_fast(current_price, plan, candles):
+            self.close_trade("Fail Fast - Plan invalidated", current_price)
+            return
         
-        # معالجة أحداث الخروج
-        for exit_event in exit_events:
-            if exit_event['type'] == 'FAIL_FAST':
-                self.close_trade(exit_event['reason'], current_price, is_fail_fast=True)
-                self.fail_fast_exits += 1
-                return
-            
-            elif exit_event['type'] == 'TAKE_PROFIT':
-                exit_pct = self.smart_exit_engine.calculate_partial_exit_size(
-                    self.current_trade_plan, exit_event
-                )
-                
-                if exit_pct > 0:
-                    if exit_pct >= 1.0:  # خروج كامل
-                        self.close_trade(f"{exit_event['level']} reached", current_price)
-                    else:  # خروج جزئي
-                        self.execute_partial_exit(exit_pct, exit_event, current_price)
-            
-            elif exit_event['type'] in ['STRUCTURE_BREAK', 'FINAL_TARGET']:
-                self.close_trade(exit_event['reason'], current_price)
-                return
+        # فحص أهداف الصفقة
+        self._check_targets(current_price, plan)
         
-        # إدارة المراحل العادية (إذا لم يكن هناك خروج)
+        # إدارة الصفقة حسب الخطة
         self._update_trade_phase(current_price, candles)
         
-        # حساب وقف الخسارة الحالي
+        # تحديث وقف الخسارة
         sl_price, sl_reason = self.trade_phase_engine.calculate_stop_loss(current_price, candles)
         
         # التحقق من وقف الخسارة
@@ -1663,82 +1677,236 @@ class SmartTradeManager:
             self.close_trade(f"Stop Loss: {sl_reason}", current_price)
             return
         
-        # لوج حالة إدارة الصفقة
-        profit_pct = self.calculate_profit_pct(current_price)
-        state = self.trade_phase_engine.current_state
-        
-        current_time = time.time()
-        if (current_time - self.trade_phase_engine.state_changed_at) < 30 or state != getattr(self, '_last_logged_state', None):
-            self._last_logged_state = state
-            
-            self.logger.log_management(
-                phase=state,
-                action="HOLD",
-                reason=f"Managing position with plan",
-                current_pnl=profit_pct,
-                new_stop_loss=sl_price,
-                extra_details={
-                    "State": state,
-                    "Plan_Valid": self.current_trade_plan.valid,
-                    "Remaining_Qty": f"{self.current_position['remaining_qty']:.4f}",
-                    "Time_in_Trade": f"{int(time_in_trade)}s"
-                }
-            )
-    
-    def execute_partial_exit(self, exit_pct: float, exit_event: Dict, current_price: float):
-        """تنفيذ خروج جزئي"""
-        if not self.active_trade or self.current_position['remaining_qty'] <= 0:
+        # التحقق من الخروج
+        should_exit, exit_reason = self.trade_phase_engine.should_exit_trade(current_price, candles)
+        if should_exit:
+            self.close_trade(exit_reason, current_price)
             return
         
-        # حساب الكمية للخروج
-        exit_qty = self.current_position['remaining_qty'] * exit_pct
+        # لوج حالة الإدارة
+        profit_pct = self.trade_phase_engine.calculate_profit_pct(current_price)
+        self.logger.log_management(
+            phase=self.trade_phase_engine.current_state,
+            action="HOLD",
+            reason=f"Managing {plan.trend_class} trend",
+            current_pnl=profit_pct,
+            new_stop_loss=sl_price,
+            extra_details={
+                "Plan_Valid": plan.valid,
+                "TP1_Hit": self.trade_phase_engine.targets_hit['tp1'],
+                "TP2_Hit": self.trade_phase_engine.targets_hit['tp2'],
+                "TP3_Hit": self.trade_phase_engine.targets_hit['tp3']
+            }
+        )
+    
+    def _update_trade_phase(self, current_price: float, candles: List[Dict]):
+        """تحديث مرحلة الصفقة"""
+        engine = self.trade_phase_engine
         
-        # تحديث الكمية المتبقية
-        self.current_position['remaining_qty'] -= exit_qty
+        # الانتقال بين المراحل
+        if engine.current_state == TradeState.ENTRY:
+            should_protect, reason = engine.should_move_to_protect(current_price, candles)
+            if should_protect:
+                engine.update_state(TradeState.PROTECT, reason)
+                self.logger.log_management(
+                    phase="PROTECT",
+                    action="ACTIVATED",
+                    reason=reason,
+                    current_pnl=engine.calculate_profit_pct(current_price)
+                )
         
-        # تنفيذ الأمر (أو محاكاة)
-        opposite_side = "sell" if self.current_trade_plan.side == "BUY" else "buy"
-        success = self.execute_order(opposite_side, exit_qty, current_price, is_open=False)
+        elif engine.current_state == TradeState.PROTECT:
+            should_be, reason = engine.should_move_to_breakeven(current_price, candles)
+            if should_be:
+                engine.update_state(TradeState.BREAKEVEN, reason)
+                self.logger.log_management(
+                    phase="BREAKEVEN",
+                    action="ACTIVATED",
+                    reason=reason,
+                    current_pnl=engine.calculate_profit_pct(current_price)
+                )
         
-        if success:
-            # لوج الخروج الجزئي
+        elif engine.current_state in [TradeState.BREAKEVEN, TradeState.TRAIL, TradeState.TRIM]:
+            should_trail, reason = engine.should_move_to_trail(current_price, candles)
+            if should_trail:
+                engine.update_state(TradeState.TRAIL, reason)
+                self.logger.log_management(
+                    phase="TRAIL",
+                    action="ACTIVATED",
+                    reason=reason,
+                    current_pnl=engine.calculate_profit_pct(current_price)
+                )
+            
+            should_trim, trim_reason = engine.should_trim_position(current_price, candles)
+            if should_trim:
+                # تنفيذ ترام جزئي
+                self._execute_trim(current_price, trim_reason)
+                engine.trim_count += 1
+                engine.update_state(TradeState.TRIM, f"Trim #{engine.trim_count}: {trim_reason}")
+    
+    def _execute_trim(self, current_price: float, reason: str):
+        """تنفيذ تقليل المركز"""
+        if self.trade_phase_engine and self.current_position['quantity'] > 0:
+            # تحديد نسبة الترام حسب نوع الصفقة
+            if self.trade_phase_engine.trade_plan.trend_class == "MID":
+                trim_percent = 0.4  # ترام أكبر للموجات المتوسطة
+            else:
+                trim_percent = 0.2  # ترام أصغر للموجات الكبيرة
+            
+            trim_qty = self.current_position['quantity'] * trim_percent
+            
+            # تحديث الكمية الحالية
+            self.current_position['quantity'] -= trim_qty
+            
+            # لوج الترام
             self.logger.log_management(
-                phase="PARTIAL_EXIT",
+                phase="TRIM",
                 action="EXECUTING",
-                reason=f"{exit_event['level']} reached",
-                trimmed_qty=exit_qty,
+                reason=f"Closing {trim_percent*100:.0f}%: {reason}",
+                trimmed_qty=trim_qty,
                 extra_details={
-                    "Exit_Pct": f"{exit_pct*100:.0f}%",
-                    "Remaining_Qty": f"{self.current_position['remaining_qty']:.4f}",
-                    "Level": exit_event['level'],
-                    "Price": current_price
+                    "Trim_Pct": f"{trim_percent*100:.0f}%",
+                    "Remaining_Qty": f"{self.current_position['quantity']:.4f}",
+                    "Reason": reason
                 }
             )
-            
-            # إذا كان هذا هو TP1، نقل وقف الخسارة إلى نقطة التعادل
-            if exit_event['level'] == 'TP1' and self.current_trade_plan.breakeven_rule == "AFTER_TP1":
-                self.trade_phase_engine.update_state(TradeState.BREAKEVEN, 
-                                                   "Moving to breakeven after TP1 hit")
     
-    def close_trade(self, reason: str, exit_price: float, is_fail_fast: bool = False):
+    def _should_fail_fast(self, current_price: float, plan: TradePlan, 
+                          candles: List[Dict]) -> bool:
+        """فحص الإبطال السريع للصفقة"""
+        # 1. اختراق مستوى الإبطال
+        if plan.side == "BUY":
+            if current_price <= plan.invalidation:
+                self.logger.log_management(
+                    phase="FAIL_FAST",
+                    action="INVALIDATION_HIT",
+                    reason=f"Price hit invalidation level: {plan.invalidation:.4f}",
+                    current_pnl=self.trade_phase_engine.calculate_profit_pct(current_price)
+                )
+                return True
+        else:
+            if current_price >= plan.invalidation:
+                self.logger.log_management(
+                    phase="FAIL_FAST",
+                    action="INVALIDATION_HIT",
+                    reason=f"Price hit invalidation level: {plan.invalidation:.4f}",
+                    current_pnl=self.trade_phase_engine.calculate_profit_pct(current_price)
+                )
+                return True
+        
+        # 2. كشف الاختراق الكاذب
+        if len(candles) >= 3:
+            current_candle = candles[-1]
+            prev_candle = candles[-2]
+            
+            fake_breakout = False
+            if plan.side == "BUY":
+                # اختراق صاعد كاذب
+                if current_candle['high'] > prev_candle['high'] and current_candle['close'] < prev_candle['close']:
+                    fake_breakout = True
+            else:
+                # اختراق هابط كاذب
+                if current_candle['low'] < prev_candle['low'] and current_candle['close'] > prev_candle['close']:
+                    fake_breakout = True
+            
+            if fake_breakout:
+                self.logger.log_management(
+                    phase="FAIL_FAST",
+                    action="FAKE_BREAKOUT",
+                    reason="Fake breakout detected",
+                    current_pnl=self.trade_phase_engine.calculate_profit_pct(current_price)
+                )
+                return True
+        
+        return False
+    
+    def _check_targets(self, current_price: float, plan: TradePlan):
+        """فحص أهداف الصفقة وتنفيذ الجني الجزئي"""
+        engine = self.trade_phase_engine
+        
+        # TP1
+        if not engine.targets_hit['tp1']:
+            if plan.side == "BUY":
+                if current_price >= plan.tp1:
+                    self._execute_partial_close(plan.tp1, "TP1", 0.3)
+                    engine.targets_hit['tp1'] = True
+            else:
+                if current_price <= plan.tp1:
+                    self._execute_partial_close(plan.tp1, "TP1", 0.3)
+                    engine.targets_hit['tp1'] = True
+        
+        # TP2
+        if engine.targets_hit['tp1'] and not engine.targets_hit['tp2']:
+            if plan.side == "BUY":
+                if current_price >= plan.tp2:
+                    self._execute_partial_close(plan.tp2, "TP2", 0.3)
+                    engine.targets_hit['tp2'] = True
+            else:
+                if current_price <= plan.tp2:
+                    self._execute_partial_close(plan.tp2, "TP2", 0.3)
+                    engine.targets_hit['tp2'] = True
+        
+        # TP3 (للموجات الكبيرة فقط)
+        if plan.trend_class == "LARGE" and engine.targets_hit['tp2'] and not engine.targets_hit['tp3']:
+            if plan.tp3:
+                if plan.side == "BUY":
+                    if current_price >= plan.tp3:
+                        self._execute_partial_close(plan.tp3, "TP3", 0.4)
+                        engine.targets_hit['tp3'] = True
+                else:
+                    if current_price <= plan.tp3:
+                        self._execute_partial_close(plan.tp3, "TP3", 0.4)
+                        engine.targets_hit['tp3'] = True
+    
+    def _execute_partial_close(self, target_price: float, target_name: str, pct: float):
+        """تنفيذ إغلاق جزئي"""
+        if self.active_trade and self.current_position['quantity'] > 0:
+            close_qty = self.current_position['quantity'] * pct
+            
+            # تحديث الكمية الحالية
+            self.current_position['quantity'] -= close_qty
+            
+            # لوج الجني الجزئي
+            self.logger.log_management(
+                phase="PARTIAL_CLOSE",
+                action=target_name,
+                reason=f"Liquidity target reached: {target_price:.4f}",
+                current_pnl=self.trade_phase_engine.calculate_profit_pct(target_price),
+                trimmed_qty=close_qty,
+                extra_details={
+                    "Target": target_name,
+                    "Price": f"{target_price:.4f}",
+                    "Percentage": f"{pct*100:.0f}%",
+                    "Remaining_Qty": f"{self.current_position['quantity']:.4f}"
+                }
+            )
+    
+    def _should_hit_stop_loss(self, current_price: float, stop_loss: float) -> bool:
+        """التحقق من ضرب وقف الخسارة"""
+        if self.trade_phase_engine.side == "BUY":
+            return current_price <= stop_loss
+        else:
+            return current_price >= stop_loss
+    
+    def close_trade(self, reason: str, exit_price: float):
         """إغلاق الصفقة"""
         if not self.active_trade or self.trade_phase_engine is None:
             return
         
-        # حساب الربح/الخسارة على الكمية المتبقية
+        # حساب الربح/الخسارة
         entry_price = self.trade_phase_engine.entry_price
         side = self.trade_phase_engine.side
-        remaining_qty = self.current_position['remaining_qty']
+        quantity = self.current_position['quantity']
         
         if side == "BUY":
             pnl_pct = ((exit_price - entry_price) / entry_price) * 100
-            pnl_usd = (exit_price - entry_price) * remaining_qty
+            pnl_usd = (exit_price - entry_price) * quantity
         else:
             pnl_pct = ((entry_price - exit_price) / entry_price) * 100
-            pnl_usd = (entry_price - exit_price) * remaining_qty
+            pnl_usd = (entry_price - exit_price) * quantity
         
-        # حساب نسبة المخاطرة/العائد من الخطة الأصلية
-        initial_risk_pct = abs((self.current_trade_plan.stop_loss - entry_price) / entry_price * 100) if self.current_trade_plan.stop_loss else 0
+        # حساب نسبة المخاطرة/العائد
+        initial_risk_pct = abs((self.trade_phase_engine.last_stop_loss - entry_price) / entry_price * 100) if self.trade_phase_engine.last_stop_loss else 0
         risk_reward = abs(pnl_pct / initial_risk_pct) if initial_risk_pct > 0 else 0
         
         # مدة الصفقة
@@ -1751,34 +1919,8 @@ class SmartTradeManager:
         # تحديث الإحصائيات
         self.total_pnl += pnl_pct
         self.total_trades += 1
-        
-        if is_fail_fast:
-            reason = f"FAIL-FAST: {reason}"
-        elif pnl_pct > 0:
+        if pnl_pct > 0:
             self.winning_trades += 1
-        
-        # إغلاق المركز المتبقي (إذا كان هناك كمية متبقية)
-        if remaining_qty > 0:
-            opposite_side = "sell" if side == "BUY" else "buy"
-            self.execute_order(opposite_side, remaining_qty, exit_price, is_open=False)
-        
-        # تحديث سجل الصفقة
-        if self.trades_history:
-            self.trades_history[-1].update({
-                'exit_price': exit_price,
-                'exit_reason': reason,
-                'pnl_pct': pnl_pct,
-                'pnl_usd': pnl_usd,
-                'risk_reward': risk_reward,
-                'exit_time': datetime.now().isoformat(),
-                'duration': duration_str,
-                'final_state': self.trade_phase_engine.current_state,
-                'trim_count': self.trade_phase_engine.trim_count,
-                'is_fail_fast': is_fail_fast,
-                'tp1_hit': getattr(self.trade_phase_engine, 'tp1_hit', False),
-                'tp2_hit': getattr(self.trade_phase_engine, 'tp2_hit', False),
-                'tp3_hit': getattr(self.trade_phase_engine, 'tp3_hit', False)
-            })
         
         # لوج الخروج
         self.logger.log_exit(
@@ -1790,66 +1932,54 @@ class SmartTradeManager:
             summary={
                 "Entry Price": f"{entry_price:.4f}",
                 "Exit Price": f"{exit_price:.4f}",
-                "Quantity": f"{remaining_qty:.4f}",
+                "Quantity": f"{quantity:.4f}",
                 "PnL USD": f"${pnl_usd:.2f}",
                 "Trade Duration": duration_str,
                 "Trade Phase": self.trade_phase_engine.current_state,
                 "Trim Count": self.trade_phase_engine.trim_count,
-                "Fail Fast": "Yes" if is_fail_fast else "No"
+                "Trend Class": self.trade_phase_engine.trade_plan.trend_class
             }
         )
+        
+        # إغلاق الصفقة (أو محاكاة)
+        if quantity > 0:
+            opposite_side = "sell" if side == "BUY" else "buy"
+            self.execute_order(opposite_side, quantity, exit_price, is_open=False)
+        
+        # تسجيل النتيجة
+        if self.trades_history:
+            self.trades_history[-1].update({
+                'exit_price': exit_price,
+                'exit_reason': reason,
+                'pnl_pct': pnl_pct,
+                'pnl_usd': pnl_usd,
+                'risk_reward': risk_reward,
+                'exit_time': datetime.now().isoformat(),
+                'duration': duration_str,
+                'final_state': self.trade_phase_engine.current_state,
+                'trim_count': self.trade_phase_engine.trim_count
+            })
         
         # إعادة التعيين
         self.active_trade = False
         self.trade_phase_engine = None
-        self.current_trade_plan = None
         self.current_position = {
             'side': None,
             'entry_price': 0.0,
             'quantity': 0.0,
-            'remaining_qty': 0.0,
-            'entry_time': None
+            'entry_time': None,
+            'plan': None
         }
         
         self.logger.log_system(
             f"Trade closed | PnL: {pnl_pct:+.2f}% | Reason: {reason}",
             "INFO" if pnl_pct >= 0 else "WARNING",
-            {
-                "PnL": f"{pnl_pct:+.2f}%",
-                "Reason": reason,
-                "RR": f"1:{risk_reward:.1f}",
-                "Fail_Fast": is_fail_fast
-            }
+            {"PnL": f"{pnl_pct:+.2f}%", "Reason": reason, "RR": f"1:{risk_reward:.1f}"}
         )
-    
-    def calculate_profit_pct(self, current_price: float) -> float:
-        """حساب نسبة الربح/الخسارة الحالية"""
-        if not self.active_trade or not self.current_position['entry_price']:
-            return 0.0
-        
-        if self.current_position['side'] == "BUY":
-            return ((current_price - self.current_position['entry_price']) / self.current_position['entry_price']) * 100
-        else:
-            return ((self.current_position['entry_price'] - current_price) / self.current_position['entry_price']) * 100
-    
-    def _should_hit_stop_loss(self, current_price: float, stop_loss: float) -> bool:
-        """التحقق من ضرب وقف الخسارة"""
-        if self.trade_phase_engine.side == "BUY":
-            return current_price <= stop_loss
-        else:
-            return current_price >= stop_loss
-    
-    def _update_trade_phase(self, current_price: float, candles: List[Dict]):
-        """تحديث مرحلة الصفقة (وظيفة مساعدة)"""
-        # هذه وظيفة مساعدة أساسية
-        pass
     
     def execute_order(self, side: str, qty: float, price: float, 
                       is_open: bool = True) -> bool:
         """تنفيذ الأمر (محاكاة أو حقيقي)"""
-        # هذا مثال للتنفيذ المحاكى
-        # في التنفيذ الحقيقي، استخدم exchange.create_order()
-        
         global DRY_RUN, EXECUTE_ORDERS
         
         if DRY_RUN or not EXECUTE_ORDERS:
@@ -1927,12 +2057,216 @@ class SmartTradeManager:
             'best_trade': best_trade,
             'worst_trade': worst_trade,
             'recent_trades': self.trades_history[-5:] if self.trades_history else [],
-            'current_position': self.current_position if self.active_trade else None,
-            'fail_fast_exits': self.fail_fast_exits
+            'current_position': self.current_position if self.active_trade else None
         }
+    
+    # ===== الدوال المساعدة =====
+    
+    def _detect_liquidity_event(self, candles: List[Dict]) -> Dict[str, Any]:
+        """كشف حدث السيولة"""
+        if len(candles) < 5:
+            return {"type": None, "detected": False}
+        
+        current = candles[-1]
+        prev_highs = [c['high'] for c in candles[-5:-1]]
+        prev_lows = [c['low'] for c in candles[-5:-1]]
+        
+        if not prev_highs or not prev_lows:
+            return {"type": None, "detected": False}
+        
+        # كشف Sweep
+        sweep_up = current['high'] > max(prev_highs) and current['close'] < candles[-2]['close']
+        sweep_down = current['low'] < min(prev_lows) and current['close'] > candles[-2]['close']
+        
+        if sweep_up:
+            return {"type": "SWEEP_HIGH", "detected": True}
+        elif sweep_down:
+            return {"type": "SWEEP_LOW", "detected": True}
+        
+        return {"type": None, "detected": False}
+    
+    def _determine_zone_type(self, side: str, structure: Dict, current_price: float, 
+                            df: pd.DataFrame) -> str:
+        """تحديد نوع المنطقة"""
+        if df.empty or len(df) < 10:
+            return "UNKNOWN"
+        
+        if side == "BUY":
+            # للشراء: نبحث عن مناطق طلب
+            recent_lows = df['low'].tail(10).values
+            if len(recent_lows) == 0:
+                return "DEMAND"
+            
+            if current_price <= min(recent_lows) * 1.005:
+                return "EXTREME_LOW"
+            else:
+                return "DEMAND"
+        else:
+            # للبيع: نبحث عن مناطق عرض
+            recent_highs = df['high'].tail(10).values
+            if len(recent_highs) == 0:
+                return "SUPPLY"
+            
+            if current_price >= max(recent_highs) * 0.995:
+                return "EXTREME_HIGH"
+            else:
+                return "SUPPLY"
+    
+    def _detect_confirmation(self, side: str, candles: List[Dict]) -> str:
+        """كشف شمعة التأكيد"""
+        if len(candles) < 2:
+            return None
+        
+        current = candles[-1]
+        prev = candles[-2]
+        
+        # شمعة رفض (Rejection)
+        if side == "BUY":
+            if current['close'] > current['open'] and (current['close'] - current['open']) / (current['high'] - current['low']) > 0.6:
+                return "BULLISH_REJECTION"
+        else:
+            if current['close'] < current['open'] and (current['open'] - current['close']) / (current['high'] - current['low']) > 0.6:
+                return "BEARISH_REJECTION"
+        
+        # شمعة إغراق (Engulfing)
+        if side == "BUY":
+            if current['close'] > prev['open'] and current['open'] < prev['close']:
+                return "BULLISH_ENGULFING"
+        else:
+            if current['close'] < prev['open'] and current['open'] > prev['close']:
+                return "BEARISH_ENGULFING"
+        
+        return None
+    
+    def _calculate_invalidation(self, side: str, structure: Dict, candles: List[Dict]) -> Tuple[float, str]:
+        """حساب مستوى الإبطال"""
+        if len(candles) < 10:
+            # قيم افتراضية إذا لم يكن هناك بيانات كافية
+            if side == "BUY":
+                recent_lows = [c['low'] for c in candles]
+                invalidation = min(recent_lows) if recent_lows else 0
+            else:
+                recent_highs = [c['high'] for c in candles]
+                invalidation = max(recent_highs) if recent_highs else float('inf')
+            reason = "Recent extreme"
+        else:
+            if side == "BUY":
+                # للشراء: أقل قاع حديث
+                recent_lows = [c['low'] for c in candles[-10:]]
+                invalidation = min(recent_lows) if recent_lows else 0
+                reason = "Break below recent low"
+            else:
+                # للبيع: أعلى قمة حديثة
+                recent_highs = [c['high'] for c in candles[-10:]]
+                invalidation = max(recent_highs) if recent_highs else float('inf')
+                reason = "Break above recent high"
+        
+        return invalidation, reason
+    
+    def _calculate_stop_loss(self, side: str, structure: Dict, current_price: float, 
+                            candles: List[Dict]) -> Tuple[float, str]:
+        """حساب وقف الخسارة"""
+        invalidation, _ = self._calculate_invalidation(side, structure, candles)
+        
+        if side == "BUY":
+            # للشراء: تحت مستوى الإبطال قليلاً (0.5%)
+            sl = invalidation * 0.995 if invalidation > 0 else current_price * 0.99
+            reason = "Below invalidation level"
+        else:
+            # للبيع: فوق مستوى الإبطال قليلاً (0.5%)
+            sl = invalidation * 1.005 if invalidation < float('inf') else current_price * 1.01
+            reason = "Above invalidation level"
+        
+        return sl, reason
+    
+    def _calculate_liquidity_targets(self, side: str, current_price: float,
+                                   liquidity_zones: Dict, trend_class: str) -> Tuple[float, float, Optional[float]]:
+        """حساب أهداف السيولة"""
+        # TP1: أول سيولة قريبة (1-2%)
+        if side == "BUY":
+            if liquidity_zones['highs']:
+                # أقرب قمة سيولة أعلى من السعر الحالي
+                higher_highs = [h for h in liquidity_zones['highs'] if h > current_price]
+                if higher_highs:
+                    tp1 = min(higher_highs)
+                else:
+                    tp1 = current_price * 1.015
+            else:
+                tp1 = current_price * 1.015
+        else:
+            if liquidity_zones['lows']:
+                # أقرب قاع سيولة أقل من السعر الحالي
+                lower_lows = [l for l in liquidity_zones['lows'] if l < current_price]
+                if lower_lows:
+                    tp1 = max(lower_lows)
+                else:
+                    tp1 = current_price * 0.985
+            else:
+                tp1 = current_price * 0.985
+        
+        # TP2: سيولة أبعد (3-5%)
+        if side == "BUY":
+            if len(liquidity_zones['highs']) > 1:
+                # ثاني أقرب قمة سيولة
+                higher_highs = sorted([h for h in liquidity_zones['highs'] if h > current_price])
+                if len(higher_highs) > 1:
+                    tp2 = higher_highs[1]
+                elif higher_highs:
+                    tp2 = higher_highs[0] * 1.02
+                else:
+                    tp2 = tp1 * 1.03
+            else:
+                tp2 = tp1 * 1.03
+        else:
+            if len(liquidity_zones['lows']) > 1:
+                # ثاني أقرب قاع سيولة
+                lower_lows = sorted([l for l in liquidity_zones['lows'] if l < current_price], reverse=True)
+                if len(lower_lows) > 1:
+                    tp2 = lower_lows[1]
+                elif lower_lows:
+                    tp2 = lower_lows[0] * 0.98
+                else:
+                    tp2 = tp1 * 0.97
+            else:
+                tp2 = tp1 * 0.97
+        
+        # TP3: فقط للصفقات الكبيرة (5-8%)
+        tp3 = None
+        if trend_class == "LARGE":
+            if side == "BUY":
+                if liquidity_zones['major_high'] and liquidity_zones['major_high'] > current_price:
+                    tp3 = liquidity_zones['major_high']
+                else:
+                    tp3 = tp2 * 1.05
+            else:
+                if liquidity_zones['major_low'] and liquidity_zones['major_low'] < current_price:
+                    tp3 = liquidity_zones['major_low']
+                else:
+                    tp3 = tp2 * 0.95
+        
+        return tp1, tp2, tp3
+    
+    def _log_trade_plan(self, plan: TradePlan, entry_price: float):
+        """تسجيل خطة الصفقة"""
+        self.logger.log_plan(plan.get_summary(), "APPROVED")
+        
+        # تفاصيل إضافية
+        indent = " " * (len(self.logger._format_timestamp()) + 3 if self.logger.show_timestamp else 0)
+        
+        print(f"{indent}{ConsoleColors.LIGHT_CYAN}{'━' * 50}{ConsoleColors.RESET}")
+        print(f"{indent}{ConsoleColors.LIGHT_CYAN}📋 TRADE PLAN DETAILS:{ConsoleColors.RESET}")
+        print(f"{indent}{ConsoleColors.LIGHT_CYAN}Entry Price: {entry_price:.4f}{ConsoleColors.RESET}")
+        print(f"{indent}{ConsoleColors.LIGHT_CYAN}Stop Loss: {plan.sl:.4f} ({abs((plan.sl - entry_price) / entry_price * 100):.2f}%){ConsoleColors.RESET}")
+        print(f"{indent}{ConsoleColors.LIGHT_CYAN}TP1: {plan.tp1:.4f} (+{abs((plan.tp1 - entry_price) / entry_price * 100):.2f}%){ConsoleColors.RESET}")
+        if plan.tp2:
+            print(f"{indent}{ConsoleColors.LIGHT_CYAN}TP2: {plan.tp2:.4f} (+{abs((plan.tp2 - entry_price) / entry_price * 100):.2f}%){ConsoleColors.RESET}")
+        if plan.tp3:
+            print(f"{indent}{ConsoleColors.LIGHT_CYAN}TP3: {plan.tp3:.4f} (+{abs((plan.tp3 - entry_price) / entry_price * 100):.2f}%){ConsoleColors.RESET}")
+        print(f"{indent}{ConsoleColors.LIGHT_CYAN}Risk/Reward: 1:{plan.rr_expected:.1f}{ConsoleColors.RESET}")
+        print(f"{indent}{ConsoleColors.LIGHT_CYAN}{'━' * 50}{ConsoleColors.RESET}")
 
 # ============================================
-#  MARKET ANALYZER - محلل السوق (من الكود الأصلي)
+#  MARKET ANALYZER - محلل السوق
 # ============================================
 
 class MarketAnalyzer:
@@ -2246,257 +2580,144 @@ class MarketAnalyzer:
         return rsi
 
 # ============================================
-#  SIGNAL GENERATOR - مولد الإشارات (محدث)
+#  SIGNAL GENERATOR - مولد الإشارات
 # ============================================
 
 class SignalGenerator:
-    """مولد إشارات التداول (محدث مع تحليل متقدم)"""
+    """مولد إشارات التداول"""
     
     def __init__(self, logger: ProConsoleLogger):
         self.logger = logger
         self.last_signal_time = 0
         self.signal_cooldown = 60  # 60 ثانية بين الإشارات
     
-    def generate_market_data(self, df: pd.DataFrame, market_analysis: Dict, 
-                            current_price: float) -> Dict[str, Any]:
+    def generate_signal(self, df: pd.DataFrame, market_analysis: Dict) -> Tuple[bool, str, float, str]:
         """
-        توليد بيانات السوق المتقدمة لبناء الخطط
+        توليد إشارة تداول
         
         Returns:
-            Dict: بيانات السوق الكاملة
+            Tuple[bool, str, float, str]: (هل توجد إشارة, الجانب, الثقة, السبب)
         """
+        current_time = time.time()
+        
+        # فحص فترة التبريد
+        if current_time - self.last_signal_time < self.signal_cooldown:
+            return False, "", 0.0, f"Signal cooldown: {int(self.signal_cooldown - (current_time - self.last_signal_time))}s"
+        
         if df.empty or len(df) < 20:
-            return {}
+            return False, "", 0.0, "Insufficient data"
         
-        try:
-            # استخراج البيانات الأساسية
-            trend = market_analysis.get('trend', {})
-            structure = market_analysis.get('structure', {})
-            momentum = market_analysis.get('momentum', {})
-            liquidity = market_analysis.get('liquidity', {})
-            
-            # تحليل متقدم للسيولة
-            liquidity_event = self._analyze_liquidity_events(df, current_price)
-            
-            # تحليل الهيكل
-            structure_event = self._analyze_structure_events(df, structure)
-            
-            # تحديد نوع المنطقة
-            zone_type = self._determine_zone_type(df, current_price, structure)
-            
-            # تحديد نوع التأكيد
-            confirmation_type = self._analyze_confirmation(df)
-            
-            # تحديد الإشارة
-            signal = self._determine_signal(trend, structure, momentum, liquidity)
-            
-            # تحديد فئة الاتجاه
-            trend_class = "LARGE" if trend.get('strength', 0) > 2.0 else "MID"
-            
-            # حساب مستويات السيولة
-            internal_liquidity = self._calculate_internal_liquidity(df, signal)
-            external_liquidity = self._calculate_external_liquidity(df, signal)
-            htf_liquidity = self._calculate_htf_liquidity(df, signal) if trend_class == "LARGE" else None
-            
-            # مستوى إبطال الهيكل
-            structure_invalid_level = self._calculate_structure_invalid(df, signal, structure)
-            
-            return {
-                'signal': signal,
-                'trend_class': trend_class,
-                'liquidity_event': liquidity_event,
-                'structure_event': structure_event,
-                'zone_type': zone_type,
-                'confirmation_type': confirmation_type,
-                'internal_liquidity': internal_liquidity,
-                'external_liquidity': external_liquidity,
-                'htf_liquidity': htf_liquidity,
-                'structure_invalid_level': structure_invalid_level,
-                'current_price': current_price,
-                'timestamp': datetime.now().isoformat()
-            }
-            
-        except Exception as e:
-            self.logger.log_error(f"Failed to generate market data: {str(e)}", e, "MarketData Generation")
-            return {}
+        # استخدام تحليل السوق لاتخاذ القرار
+        trend = market_analysis.get('trend', {})
+        structure = market_analysis.get('structure', {})
+        momentum = market_analysis.get('momentum', {})
+        liquidity = market_analysis.get('liquidity', {})
+        
+        # التحقق من شروط دخول أساسية
+        if not self._check_basic_conditions(trend, structure, momentum, liquidity):
+            return False, "", 0.0, "Basic conditions not met"
+        
+        # إشارة شراء
+        buy_signal, buy_confidence, buy_reason = self._check_buy_signal(df, trend, structure, momentum)
+        if buy_signal:
+            self.last_signal_time = current_time
+            return True, "buy", buy_confidence, buy_reason
+        
+        # إشارة بيع
+        sell_signal, sell_confidence, sell_reason = self._check_sell_signal(df, trend, structure, momentum)
+        if sell_signal:
+            self.last_signal_time = current_time
+            return True, "sell", sell_confidence, sell_reason
+        
+        return False, "", 0.0, "No clear signal"
     
-    def _analyze_liquidity_events(self, df: pd.DataFrame, current_price: float) -> str:
-        """تحليل أحداث السيولة"""
-        if len(df) < 5:
-            return "NO_LIQUIDITY"
-        
-        highs = df['high'].values[-5:]
-        lows = df['low'].values[-5:]
-        
-        # كشف Sweep
-        current_high = highs[-1]
-        current_low = lows[-1]
-        
-        if current_high > max(highs[:-1]):
-            return "SWEEP_HIGH"
-        elif current_low < min(lows[:-1]):
-            return "SWEEP_LOW"
-        
-        # كشف Liquidity Tap
-        if abs(current_high - max(highs[:-1])) < current_high * 0.001:
-            return "TAP_HIGH"
-        elif abs(current_low - min(lows[:-1])) < current_low * 0.001:
-            return "TAP_LOW"
-        
-        return "NO_LIQUIDITY"
-    
-    def _analyze_structure_events(self, df: pd.DataFrame, structure: Dict) -> str:
-        """تحليل أحداث الهيكل"""
-        structure_type = structure.get('type', '')
-        
-        if 'BOS_UP' in structure_type:
-            return "BOS_UP"
-        elif 'BOS_DOWN' in structure_type:
-            return "BOS_DOWN"
-        elif 'CHoCH' in structure_type:
-            return "CHOCH"
-        
-        return "NO_STRUCTURE"
-    
-    def _determine_zone_type(self, df: pd.DataFrame, current_price: float, structure: Dict) -> str:
-        """تحديد نوع المنطقة"""
-        key_level = structure.get('key_level')
-        
-        if not key_level:
-            return "UNKNOWN"
-        
-        # حساب نسبة الاختلاف
-        diff_pct = abs(current_price - key_level) / key_level * 100
-        
-        if diff_pct < 0.5:  # ضمن 0.5% من المستوى الرئيسي
-            if current_price > key_level:
-                return "SUPPLY_ZONE"
-            else:
-                return "DEMAND_ZONE"
-        elif diff_pct < 1.0:  # ضمن 1% من المستوى الرئيسي
-            return "RETEST_ZONE"
-        
-        return "NO_ZONE"
-    
-    def _analyze_confirmation(self, df: pd.DataFrame) -> str:
-        """تحليل نوع التأكيد"""
-        if len(df) < 3:
-            return "NO_CONFIRMATION"
-        
-        current = df.iloc[-1]
-        prev = df.iloc[-2]
-        
-        # تحليل أنماط الشمعات
-        candle_range = current['high'] - current['low']
-        
-        # Pin Bar
-        upper_wick = current['high'] - max(current['close'], current['open'])
-        lower_wick = min(current['close'], current['open']) - current['low']
-        body = abs(current['close'] - current['open'])
-        
-        if upper_wick > body * 2 and upper_wick > candle_range * 0.6:
-            return "PIN_BAR_REJECTION"
-        elif lower_wick > body * 2 and lower_wick > candle_range * 0.6:
-            return "PIN_BAR_REJECTION"
-        
-        # Engulfing
-        if current['close'] > current['open'] and prev['close'] < prev['open']:
-            if current['open'] < prev['close'] and current['close'] > prev['open']:
-                return "BULLISH_ENGULFING"
-        elif current['close'] < current['open'] and prev['close'] > prev['open']:
-            if current['open'] > prev['close'] and current['close'] < prev['open']:
-                return "BEARISH_ENGULFING"
-        
-        return "PRICE_ACTION"
-    
-    def _determine_signal(self, trend: Dict, structure: Dict, momentum: Dict, liquidity: Dict) -> Optional[str]:
-        """تحديد إشارة التداول"""
-        # الشروط الأساسية
+    def _check_basic_conditions(self, trend: Dict, structure: Dict, momentum: Dict, liquidity: Dict) -> bool:
+        """التحقق من الشروط الأساسية"""
+        # يجب أن يكون هناك اتجاه واضح
         if not trend.get('confirmed', False):
-            return None
+            return False
         
+        # يجب أن تكون السيولة كافية
         if liquidity.get('level') in ["LOW", "VERY_LOW"]:
-            return None
+            return False
         
-        # إشارة الشراء
-        buy_conditions = [
-            trend.get('direction') == "BULL",
-            structure.get('type') in ["BOS_UP", "CHOCH_UP"],
-            momentum.get('direction') in ["BULLISH", "NEUTRAL"],
-            momentum.get('rsi', 50) < 70  # ليس مفرط في الشراء
-        ]
+        # يجب ألا يكون الزخم في أقصى درجاته (مفرط في الشراء/البيع)
+        if momentum.get('direction') in ["OVERBOUGHT", "OVERSOLD"] and momentum.get('score', 0) > 0.8:
+            return False
         
-        # إشارة البيع
-        sell_conditions = [
-            trend.get('direction') == "BEAR",
-            structure.get('type') in ["BOS_DOWN", "CHOCH_DOWN"],
-            momentum.get('direction') in ["BEARISH", "NEUTRAL"],
-            momentum.get('rsi', 50) > 30  # ليس مفرط في البيع
-        ]
-        
-        if all(buy_conditions):
-            return "buy"
-        elif all(sell_conditions):
-            return "sell"
-        
-        return None
+        return True
     
-    def _calculate_internal_liquidity(self, df: pd.DataFrame, signal: str) -> Optional[float]:
-        """حساب سيولة داخلية (TP1)"""
-        if len(df) < 10:
-            return None
+    def _check_buy_signal(self, df: pd.DataFrame, trend: Dict, structure: Dict, momentum: Dict) -> Tuple[bool, float, str]:
+        """التحقق من إشارة الشراء"""
+        reasons = []
+        confidence = 0.0
         
-        if signal == "buy":
-            # للشراء: أعلى قمة حديثة
-            return float(df['high'].rolling(5).max().iloc[-1] * 1.01)  # +1%
-        else:
-            # للبيع: أقل قاع حديث
-            return float(df['low'].rolling(5).min().iloc[-1] * 0.99)  # -1%
+        # 1. الاتجاه الصاعد
+        if trend.get('direction') == "BULL" and trend.get('strength', 0) > 1.0:
+            confidence += 0.3
+            reasons.append(f"Bullish trend (strength: {trend['strength']:.1f})")
+        
+        # 2. هيكل BOS صاعد
+        if structure.get('type') == "BOS_UP":
+            confidence += 0.3
+            reasons.append("Bullish BOS structure")
+        
+        # 3. زخم صاعد
+        if momentum.get('direction') == "BULLISH" and momentum.get('score', 0) > 0.3:
+            confidence += 0.2
+            reasons.append(f"Bullish momentum (score: {momentum['score']:.2f})")
+        
+        # 4. اختبار دعم مع حجم
+        recent_lows = df['low'].tail(5).values
+        current_price = df['close'].iloc[-1]
+        
+        if structure.get('key_level') and current_price <= structure['key_level'] * 1.005:
+            confidence += 0.2
+            reasons.append(f"Testing support at {structure['key_level']:.4f}")
+        
+        if confidence >= 0.6 and reasons:
+            return True, min(confidence, 0.95), " | ".join(reasons)
+        
+        return False, 0.0, ""
     
-    def _calculate_external_liquidity(self, df: pd.DataFrame, signal: str) -> Optional[float]:
-        """حساب سيولة خارجية (TP2)"""
-        if len(df) < 20:
-            return None
+    def _check_sell_signal(self, df: pd.DataFrame, trend: Dict, structure: Dict, momentum: Dict) -> Tuple[bool, float, str]:
+        """التحقق من إشارة البيع"""
+        reasons = []
+        confidence = 0.0
         
-        if signal == "buy":
-            # للشراء: مقاومة رئيسية
-            return float(df['high'].rolling(10).max().iloc[-1] * 1.02)  # +2%
-        else:
-            # للبيع: دعم رئيسي
-            return float(df['low'].rolling(10).min().iloc[-1] * 0.98)  # -2%
-    
-    def _calculate_htf_liquidity(self, df: pd.DataFrame, signal: str) -> Optional[float]:
-        """حساب سيولة إطار زمني أعلى (TP3)"""
-        if len(df) < 50:
-            return None
+        # 1. الاتجاه الهابط
+        if trend.get('direction') == "BEAR" and trend.get('strength', 0) > 1.0:
+            confidence += 0.3
+            reasons.append(f"Bearish trend (strength: {trend['strength']:.1f})")
         
-        if signal == "buy":
-            # للشراء: قمة تاريخية قريبة
-            return float(df['high'].max() * 1.03)  # +3%
-        else:
-            # للبيع: قاع تاريخي قريب
-            return float(df['low'].min() * 0.97)  # -3%
-    
-    def _calculate_structure_invalid(self, df: pd.DataFrame, signal: str, structure: Dict) -> Optional[float]:
-        """حساب مستوى إبطال الهيكل"""
-        if signal == "buy":
-            # للشراء: تحت آخر قاع هيكلي
-            swing_lows = structure.get('swing_lows', [])
-            if swing_lows:
-                return min([s['price'] for s in swing_lows[-2:]]) * 0.995  # -0.5%
-        else:
-            # للبيع: فوق آخر قمة هيكلية
-            swing_highs = structure.get('swing_highs', [])
-            if swing_highs:
-                return max([s['price'] for s in swing_highs[-2:]]) * 1.005  # +0.5%
+        # 2. هيكل BOS هابط
+        if structure.get('type') == "BOS_DOWN":
+            confidence += 0.3
+            reasons.append("Bearish BOS structure")
         
-        return None
+        # 3. زخم هابط
+        if momentum.get('direction') == "BEARISH" and momentum.get('score', 0) > 0.3:
+            confidence += 0.2
+            reasons.append(f"Bearish momentum (score: {momentum['score']:.2f})")
+        
+        # 4. اختبار مقاومة مع حجم
+        recent_highs = df['high'].tail(5).values
+        current_price = df['close'].iloc[-1]
+        
+        if structure.get('key_level') and current_price >= structure['key_level'] * 0.995:
+            confidence += 0.2
+            reasons.append(f"Testing resistance at {structure['key_level']:.4f}")
+        
+        if confidence >= 0.6 and reasons:
+            return True, min(confidence, 0.95), " | ".join(reasons)
+        
+        return False, 0.0, ""
 
 # ============================================
-#  MAIN BOT INTEGRATION - التكامل الرئيسي (محدث)
+#  MAIN BOT INTEGRATION - التكامل الرئيسي
 # ============================================
 
-# إعدادات البوت (كما هي)
+# إعدادات البوت
 EXCHANGE_NAME = os.getenv("EXCHANGE", "bybit").lower()
 
 if EXCHANGE_NAME == "bybit":
@@ -2514,7 +2735,7 @@ EXECUTE_ORDERS = True
 SHADOW_MODE_DASHBOARD = False
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 
-BOT_VERSION = "SUI ULTRA PRO AI v10.0 — SMART TRADE PLAN ENGINE"
+BOT_VERSION = "SUI ULTRA PRO AI v9.7 — SMART TRADE MANAGEMENT ENGINE WITH TRADEPLAN"
 
 # إعدادات التداول
 SYMBOL = os.getenv("SYMBOL", "SUI/USDT:USDT")
@@ -2541,7 +2762,7 @@ def make_exchange():
         exchange_config["options"] = {"defaultType": "swap"}
         return ccxt.bingx(exchange_config)
 
-# الدوال المساعدة (كما هي)
+# الدوال المساعدة
 def get_balance(exchange) -> float:
     """الحصول على الرصيد"""
     if not MODE_LIVE:
@@ -2588,11 +2809,11 @@ def convert_candles_to_dicts(df: pd.DataFrame) -> List[Dict]:
     return candles
 
 # ============================================
-#  MAIN BOT CLASS - الفئة الرئيسية للبوت (محدث)
+#  MAIN BOT CLASS - الفئة الرئيسية للبوت
 # ============================================
 
 class SUIUltraProBot:
-    """الفئة الرئيسية للبوت (محدث مع TradePlan)"""
+    """الفئة الرئيسية للبوت مع نظام TradePlan"""
     
     def __init__(self):
         self.logger = logger
@@ -2623,7 +2844,7 @@ class SUIUltraProBot:
             self.market_analyzer = MarketAnalyzer(logger=self.logger)
             self.signal_generator = SignalGenerator(logger=self.logger)
             
-            self.logger.log_system("Smart Trade Plan System Initialized", "SUCCESS")
+            self.logger.log_system("Smart Trade System with TradePlan Initialized", "SUCCESS")
             self.logger.log_system(f"Symbol: {SYMBOL} | Risk: {RISK_ALLOC*100:.0f}% | Interval: {INTERVAL}", "INFO")
             
             return True
@@ -2634,7 +2855,7 @@ class SUIUltraProBot:
     
     def run_trade_loop(self):
         """تشغيل حلقة التداول الرئيسية"""
-        self.logger.log_system("Starting Smart Trade Loop with Plan System", "INFO")
+        self.logger.log_system("Starting Smart Trade Loop with TradePlan", "INFO")
         self.running = True
         
         while self.running:
@@ -2654,40 +2875,40 @@ class SUIUltraProBot:
                 
                 # إذا كانت هناك صفقة نشطة
                 if self.smart_trade_manager.active_trade:
-                    # إدارة الصفقة الحالية باستخدام الخطة
-                    candles = convert_candles_to_dicts(df)
-                    self.smart_trade_manager.manage_trade_with_plan(current_price, candles[-20:])
+                    # إدارة الصفقة الحالية مع خطة
+                    self.smart_trade_manager.manage_trade_with_plan(current_price, df)
                 
                 else:
-                    # توليد بيانات السوق المتقدمة
-                    market_data = self.signal_generator.generate_market_data(df, market_analysis, current_price)
+                    # توليد إشارة تداول
+                    signal, side, confidence, reason = self.signal_generator.generate_signal(df, market_analysis)
                     
-                    if market_data and market_data.get('signal') and balance and balance > 10:
-                        # بناء خطة التداول
-                        trade_plan = self.smart_trade_manager.trade_plan_builder.build_trade_plan(market_data)
+                    if signal and balance and balance > 10:
+                        # بناء خطة الصفقة
+                        trade_plan = self.smart_trade_manager.build_trade_plan(
+                            side, current_price, market_analysis, df
+                        )
                         
                         if trade_plan and trade_plan.is_valid():
-                            # فتح صفقة بناءً على الخطة
+                            # فتح صفقة مع خطة
                             success = self.smart_trade_manager.open_trade_with_plan(
-                                trade_plan=trade_plan,
-                                balance=balance,
-                                current_price=current_price
+                                trade_plan, current_price, balance, reason
                             )
                             
                             if success:
                                 self.logger.log_system(
-                                    f"Trade opened with plan | {trade_plan.side.upper()} @ {current_price:.4f}",
+                                    f"Trade opened with plan | {side.upper()} @ {current_price:.4f} | RR: 1:{trade_plan.rr_expected:.1f}",
                                     "SUCCESS"
                                 )
                         else:
-                            if market_data.get('signal'):
-                                self.logger.log_blocked_entry(
-                                    "Plan validation failed",
-                                    {
-                                        'signal': market_data.get('signal'),
-                                        'liquidity': market_data.get('liquidity_event'),
-                                        'structure': market_data.get('structure_event')
-                                    }
+                            if trade_plan:
+                                self.logger.log_system(
+                                    f"Entry blocked: {trade_plan.reason}",
+                                    "WARNING"
+                                )
+                            else:
+                                self.logger.log_system(
+                                    f"Entry blocked: No valid trade plan generated",
+                                    "WARNING"
                                 )
                 
                 # النوم حتى التكرار التالي
@@ -2723,7 +2944,7 @@ class SUIUltraProBot:
         }
 
 # ============================================
-#  FLASK API SERVER - خادم API (محدث)
+#  FLASK API SERVER - خادم API
 # ============================================
 
 app = Flask(__name__)
@@ -2737,7 +2958,7 @@ def create_dashboard_html():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>SUI ULTRA PRO AI v10.0 - SMART TRADE PLAN ENGINE</title>
+        <title>SUI ULTRA PRO AI v9.7 - Trading Dashboard</title>
         <style>
             body {
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -2903,28 +3124,28 @@ def create_dashboard_html():
                 text-align: right;
                 margin-top: 20px;
             }
-            .plan-indicator {
+            .plan-badge {
                 display: inline-block;
-                padding: 2px 8px;
-                border-radius: 10px;
+                padding: 3px 8px;
+                border-radius: 12px;
                 font-size: 0.8em;
-                margin-left: 5px;
+                margin-left: 8px;
             }
-            .plan-valid {
-                background: rgba(0, 255, 136, 0.2);
-                color: #00ff88;
+            .plan-mid {
+                background: #ffcc00;
+                color: #000;
             }
-            .plan-invalid {
-                background: rgba(255, 68, 68, 0.2);
-                color: #ff4444;
+            .plan-large {
+                background: #00ccff;
+                color: #000;
             }
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
-                <h1>🧠 SUI ULTRA PRO AI v10.0</h1>
-                <div class="subtitle">SMART TRADE PLAN ENGINE WITH FAIL-FAST LOGIC</div>
+                <h1>🚀 SUI ULTRA PRO AI v9.7</h1>
+                <div class="subtitle">SMART TRADE MANAGEMENT ENGINE WITH TRADEPLAN</div>
             </div>
             
             <div class="grid">
@@ -2968,25 +3189,15 @@ def create_dashboard_html():
                             <div class="stat-value" id="total-pnl">0%</div>
                         </div>
                         <div class="stat-item">
-                            <div>Fail-Fast Exits</div>
-                            <div class="stat-value" id="fail-fast">0</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Active Trade Card -->
-                <div class="card">
-                    <h3>⚡ Active Trade</h3>
-                    <div id="active-trade-details">
-                        <div style="text-align: center; padding: 20px; color: #88aaff;">
-                            No active trade
+                            <div>Active Trade</div>
+                            <div class="stat-value" id="active-trade">No</div>
                         </div>
                     </div>
                 </div>
                 
                 <!-- Recent Trades Card -->
                 <div class="card" style="grid-column: span 2;">
-                    <h3>📊 Recent Trades</h3>
+                    <h3>📊 Recent Trades with TradePlans</h3>
                     <div class="trade-list" id="recent-trades">
                         <div style="text-align: center; padding: 40px; color: #88aaff;">
                             Loading trades...
@@ -3047,36 +3258,7 @@ def create_dashboard_html():
                         document.getElementById('total-pnl').textContent = report.total_pnl_pct ? report.total_pnl_pct.toFixed(2) + '%' : '0%';
                         document.getElementById('total-pnl').className = 'stat-value ' + 
                             (report.total_pnl_pct > 0 ? 'positive' : report.total_pnl_pct < 0 ? 'negative' : 'neutral');
-                        document.getElementById('fail-fast').textContent = report.fail_fast_exits || 0;
-                        
-                        // Update active trade
-                        const activeTradeDiv = document.getElementById('active-trade-details');
-                        if (report.active_trade && report.current_position) {
-                            const pos = report.current_position;
-                            const pnl = ((data.current_price - pos.entry_price) / pos.entry_price * 100 * (pos.side === 'buy' ? 1 : -1)).toFixed(2);
-                            const pnlClass = pnl >= 0 ? 'positive' : 'negative';
-                            
-                            activeTradeDiv.innerHTML = `
-                                <div style="margin-bottom: 10px;">
-                                    <strong>${pos.side.toUpperCase()}</strong> 
-                                    <span class="plan-indicator plan-valid">Plan Active</span>
-                                </div>
-                                <div style="font-size: 0.9em; margin-bottom: 5px;">
-                                    Entry: ${pos.entry_price ? pos.entry_price.toFixed(4) : '--'}
-                                </div>
-                                <div style="font-size: 0.9em; margin-bottom: 5px;">
-                                    Current: ${data.current_price ? data.current_price.toFixed(4) : '--'}
-                                </div>
-                                <div style="font-size: 0.9em; margin-bottom: 5px;">
-                                    P&L: <span class="${pnlClass}">${pnl}%</span>
-                                </div>
-                                <div style="font-size: 0.8em; color: #88aaff;">
-                                    ${pos.entry_time ? new Date(pos.entry_time).toLocaleTimeString() : ''}
-                                </div>
-                            `;
-                        } else {
-                            activeTradeDiv.innerHTML = '<div style="text-align: center; padding: 20px; color: #88aaff;">No active trade</div>';
-                        }
+                        document.getElementById('active-trade').textContent = report.active_trade ? 'Yes' : 'No';
                         
                         // Update recent trades
                         const tradesList = document.getElementById('recent-trades');
@@ -3085,24 +3267,24 @@ def create_dashboard_html():
                             report.recent_trades.slice().reverse().forEach(trade => {
                                 const pnlClass = trade.pnl_pct > 0 ? 'positive' : 'negative';
                                 const sideClass = trade.side === 'buy' ? 'trade-buy' : 'trade-sell';
-                                const failFastBadge = trade.is_fail_fast ? '<span style="background: #ff4444; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.7em; margin-left: 5px;">FAIL-FAST</span>' : '';
+                                const plan = trade.plan || {};
+                                const trendClass = plan.trend_class || 'MID';
+                                const planBadge = `<span class="plan-badge ${trendClass === 'LARGE' ? 'plan-large' : 'plan-mid'}">${trendClass}</span>`;
                                 
                                 tradesHtml += `
                                     <div class="trade-item ${sideClass}">
                                         <div style="display: flex; justify-content: space-between;">
-                                            <div>
-                                                <strong>${trade.side.toUpperCase()} #${trade.id}</strong>
-                                                ${failFastBadge}
-                                            </div>
+                                            <strong>${trade.side.toUpperCase()} #${trade.id} ${planBadge}</strong>
                                             <span class="${pnlClass}">${trade.pnl_pct ? trade.pnl_pct.toFixed(2) + '%' : '--'}</span>
                                         </div>
                                         <div style="font-size: 0.9em; color: #88aaff;">
                                             Entry: ${trade.entry_price ? trade.entry_price.toFixed(4) : '--'} | 
                                             Exit: ${trade.exit_price ? trade.exit_price.toFixed(4) : '--'} | 
-                                            ${trade.exit_reason || 'Active'}
+                                            RR: ${plan.rr_expected ? '1:' + plan.rr_expected.toFixed(1) : '--'}
                                         </div>
                                         <div style="font-size: 0.8em; color: #aaccff; margin-top: 5px;">
-                                            ${trade.timestamp ? new Date(trade.timestamp).toLocaleString() : ''}
+                                            ${trade.timestamp ? new Date(trade.timestamp).toLocaleString() : ''} | 
+                                            ${trade.exit_reason || 'Active'}
                                         </div>
                                     </div>
                                 `;
@@ -3169,13 +3351,10 @@ def api_trades():
 @app.route('/api/trade/action', methods=['POST'])
 def trade_action():
     """إجراء يدوي على الصفقة (لحالات الطوارئ)"""
-    # هذه الدالة للاستخدام في حالات الطوارئ فقط
     if not bot_instance or not bot_instance.smart_trade_manager:
         return jsonify({'error': 'Bot not initialized'}), 500
     
-    # في الواقع، يجب التحقق من البيانات المرسلة
-    # لكن لأغراض التوضيح، سنقوم بإغلاق أي صفقة نشطة
-    
+    # إغلاق الصفقة النشطة إذا كانت موجودة
     if bot_instance.smart_trade_manager.active_trade:
         current_price = get_current_price(bot_instance.exchange, SYMBOL)
         if current_price:
@@ -3195,11 +3374,6 @@ def main():
     global bot_instance
     
     try:
-        # طباعة بانر البداية
-        print(f"\n{ConsoleColors.LIGHT_CYAN}{'='*80}{ConsoleColors.RESET}")
-        print(f"{ConsoleColors.LIGHT_GREEN}{BOT_VERSION}{ConsoleColors.RESET}")
-        print(f"{ConsoleColors.LIGHT_CYAN}{'='*80}{ConsoleColors.RESET}\n")
-        
         # إنشاء وتشغيل البوت
         bot_instance = SUIUltraProBot()
         
@@ -3226,4 +3400,11 @@ def main():
             bot_instance.stop()
 
 if __name__ == "__main__":
+    # طباعة بانر البداية
+    print(f"\n{ConsoleColors.LIGHT_CYAN}{'='*80}{ConsoleColors.RESET}")
+    print(f"{ConsoleColors.LIGHT_GREEN}{BOT_VERSION}{ConsoleColors.RESET}")
+    print(f"{ConsoleColors.LIGHT_CYAN}🔥 Smart Trade Management with TradePlan System 🔥{ConsoleColors.RESET}")
+    print(f"{ConsoleColors.LIGHT_CYAN}{'='*80}{ConsoleColors.RESET}\n")
+    
+    # تشغيل البوت
     main()
