@@ -255,6 +255,441 @@ class ProConsoleLogger:
         
         return f"{ConsoleColors.LIGHT_BLACK}{key}={color}{value_str}{ConsoleColors.LIGHT_BLACK}{unit}{ConsoleColors.RESET}"
     
+    def log_market(self, 
+                  timeframe: str,
+                  trend: str,
+                  structure: str,
+                  liquidity: str,
+                  momentum: Optional[float] = None,
+                  volume_profile: Optional[str] = None,
+                  reason: Optional[str] = None,
+                  extra_details: Dict[str, Any] = None):
+        """
+        طباعة تحليل السوق
+        
+        Args:
+            timeframe: الإطار الزمني
+            trend: الاتجاه (BULL/BEAR/SIDEWAYS)
+            structure: الهيكل (BOS/CHoCH/OB/DISTRIBUTION)
+            liquidity: السيولة (HIGH/LOW)
+            momentum: الزخم (اختياري)
+            volume_profile: ملف الحجم (اختياري)
+            reason: سبب التحليل (اختياري)
+            extra_details: تفاصيل إضافية (اختياري)
+        """
+        header = self._get_layer_header(LogCategory.MARKET)
+        
+        # بناء الرسالة
+        parts = []
+        
+        # المعلومات الأساسية
+        parts.append(f"TF={timeframe}")
+        
+        # الاتجاه مع أيقونة
+        trend_icon = self.STATUS_ICONS['UP_TREND'] if trend == 'BULL' else self.STATUS_ICONS['DOWN_TREND'] if trend == 'BEAR' else self.STATUS_ICONS['CONSOLIDATION']
+        parts.append(f"Trend={trend_icon}{trend}")
+        parts.append(f"Structure={structure}")
+        
+        # إضافة الزخم إذا كان موجوداً
+        if momentum is not None:
+            momentum_icon = self.STATUS_ICONS['ARROW_UP'] if momentum > 0 else self.STATUS_ICONS['ARROW_DOWN']
+            parts.append(f"Momentum={momentum_icon}{abs(momentum):.1f}")
+        
+        # السيولة مع أيقونة
+        liquidity_icon = self.STATUS_ICONS['CHECK'] if 'HIGH' in liquidity.upper() else self.STATUS_ICONS['CROSS']
+        parts.append(f"Liquidity={liquidity} {liquidity_icon}")
+        
+        # ملف الحجم إذا كان موجوداً
+        if volume_profile:
+            parts.append(f"Volume={volume_profile}")
+        
+        # تفاصيل إضافية
+        if extra_details:
+            for key, value in extra_details.items():
+                parts.append(f"{key}={value}")
+        
+        # تجميع الأجزاء
+        message = f"{ConsoleColors.LIGHT_WHITE} | ".join(parts) + ConsoleColors.RESET
+        
+        # الطباعة
+        if self.show_timestamp:
+            print(f"{ConsoleColors.LIGHT_BLACK}[{self._format_timestamp()}]{ConsoleColors.RESET} {header} {message}")
+        else:
+            print(f"{header} {message}")
+        
+        # سبب التحليل إذا كان موجوداً
+        if reason:
+            why_text = self._format_reason(reason)
+            indent = " " * (len(self._format_timestamp()) + 3 if self.show_timestamp else 0)
+            print(f"{indent}{why_text}")
+        
+        # تسجيل في الملف
+        self.file_logger.info(f"MARKET | TF={timeframe} | Trend={trend} | Structure={structure} | Liquidity={liquidity}")
+    
+    def log_entry(self,
+                 side: str,
+                 zone_type: str,
+                 candle_pattern: str,
+                 confidence: float,
+                 reason: Optional[str] = None,
+                 priority: Optional[str] = None,
+                 entry_price: Optional[float] = None):
+        """
+        طباعة نقطة الدخول
+        
+        Args:
+            side: الجانب (BUY/SELL)
+            zone_type: نوع المنطقة (DEMAND/SUPPLY/OB/LQ)
+            candle_pattern: نمط الشمعة (Rejection/Absorption/PinBar/Engulfing)
+            confidence: الثقة (0-1)
+            reason: سبب الدخول (اختياري)
+            priority: الأولوية (HIGH/MEDIUM/LOW) (اختياري)
+            entry_price: سعر الدخول (اختياري)
+        """
+        header = self._get_layer_header(LogCategory.ENTRY)
+        
+        # تحديد لون الجانب
+        if side.upper() == 'BUY':
+            side_color = ConsoleColors.GREEN
+            side_icon = '🟢'
+        else:
+            side_color = ConsoleColors.RED
+            side_icon = '🔴'
+        
+        # تحديد أيقونة الثقة
+        if confidence >= 0.8:
+            conf_icon = self.STATUS_ICONS['STAR']
+            conf_color = ConsoleColors.GREEN
+        elif confidence >= 0.6:
+            conf_icon = self.STATUS_ICONS['CHECK']
+            conf_color = ConsoleColors.YELLOW
+        else:
+            conf_icon = self.STATUS_ICONS['WARNING']
+            conf_color = ConsoleColors.RED
+        
+        # بناء الرسالة
+        parts = []
+        parts.append(f"Side={side_color}{side_icon}{side}{ConsoleColors.RESET}")
+        parts.append(f"Zone={zone_type}")
+        parts.append(f"Candle={candle_pattern}")
+        parts.append(f"Conf={conf_color}{conf_icon}{confidence:.2f}{ConsoleColors.RESET}")
+        
+        # إضافة سعر الدخول إذا كان موجوداً
+        if entry_price is not None:
+            parts.append(f"Price={entry_price:.4f}")
+        
+        # إضافة الأولوية إذا كانت موجودة
+        if priority:
+            priority_color = ConsoleColors.RED if priority == 'HIGH' else ConsoleColors.YELLOW if priority == 'MEDIUM' else ConsoleColors.GREEN
+            parts.append(f"Priority={priority_color}{priority}{ConsoleColors.RESET}")
+        
+        message = f"{ConsoleColors.LIGHT_WHITE} | ".join(parts) + ConsoleColors.RESET
+        
+        # الطباعة
+        if self.show_timestamp:
+            print(f"{ConsoleColors.LIGHT_BLACK}[{self._format_timestamp()}]{ConsoleColors.RESET} {header} {message}")
+        else:
+            print(f"{header} {message}")
+        
+        # سبب الدخول
+        if reason:
+            why_text = self._format_reason(reason)
+            indent = " " * (len(self._format_timestamp()) + 3 if self.show_timestamp else 0)
+            print(f"{indent}{why_text}")
+        
+        # تسجيل في الملف
+        self.file_logger.info(f"ENTRY | Side={side} | Zone={zone_type} | Confidence={confidence:.2f}")
+    
+    def log_execution(self,
+                     price: float,
+                     quantity: float,
+                     stop_loss: float,
+                     sl_reason: str,
+                     order_type: str = "MARKET",
+                     exchange: str = "BYBIT",
+                     position_value: Optional[float] = None):
+        """
+        طباعة تنفيذ الأمر
+        
+        Args:
+            price: سعر الدخول
+            quantity: الكمية
+            stop_loss: وقف الخسارة
+            sl_reason: سبب وقف الخسارة
+            order_type: نوع الأمر (اختياري)
+            exchange: المنصة (اختياري)
+            position_value: قيمة المركز (اختياري)
+        """
+        header = self._get_layer_header(LogCategory.EXECUTION)
+        
+        # حساب نسبة المخاطرة
+        risk_percent = abs((stop_loss - price) / price * 100)
+        
+        # بناء الرسالة
+        parts = []
+        parts.append(f"{ConsoleColors.CYAN}Price={ConsoleColors.YELLOW}{price:.4f}{ConsoleColors.RESET}")
+        parts.append(f"Qty={ConsoleColors.GREEN}{quantity:.2f}{ConsoleColors.RESET}")
+        parts.append(f"SL={ConsoleColors.RED}{stop_loss:.4f} ({sl_reason}){ConsoleColors.RESET}")
+        parts.append(f"Risk={risk_percent:.2f}%")
+        parts.append(f"Type={order_type}")
+        parts.append(f"Exchange={exchange}")
+        
+        # قيمة المركز إذا كانت موجودة
+        if position_value:
+            parts.append(f"Value=${position_value:.2f}")
+        
+        message = f"{ConsoleColors.LIGHT_WHITE} | ".join(parts) + ConsoleColors.RESET
+        
+        # الطباعة
+        if self.show_timestamp:
+            print(f"{ConsoleColors.LIGHT_BLACK}[{self._format_timestamp()}]{ConsoleColors.RESET} {header} {message}")
+        else:
+            print(f"{header} {message}")
+        
+        # إضافة خط فاصل
+        print(f"{ConsoleColors.LIGHT_BLACK}{'─' * 80}{ConsoleColors.RESET}")
+        
+        # تسجيل في الملف
+        self.file_logger.info(f"EXECUTION | Price={price:.4f} | Qty={quantity:.2f} | SL={stop_loss:.4f}")
+    
+    def log_management(self,
+                      phase: str,
+                      action: str,
+                      reason: str,
+                      current_pnl: Optional[float] = None,
+                      new_stop_loss: Optional[float] = None,
+                      trimmed_qty: Optional[float] = None,
+                      extra_details: Dict[str, Any] = None):
+        """
+        طباعة إدارة الصفقة
+        
+        Args:
+            phase: المرحلة (PROTECT/BREAKEVEN/TRAIL/TRIM)
+            action: الإجراء (MOVE_SL/TRIM/ADD/BREAKEVEN)
+            reason: السبب
+            current_pnl: الربح/الخسارة الحالي % (اختياري)
+            new_stop_loss: وقف الخسارة الجديد (اختياري)
+            trimmed_qty: الكمية المقتطعة (اختياري)
+            extra_details: تفاصيل إضافية (اختياري)
+        """
+        header = self._get_layer_header(LogCategory.MANAGEMENT)
+        
+        # تحديد لون الربح/الخسارة
+        if current_pnl is not None:
+            if current_pnl >= 0:
+                pnl_color = ConsoleColors.GREEN
+                pnl_icon = self.STATUS_ICONS['ARROW_UP']
+            else:
+                pnl_color = ConsoleColors.RED
+                pnl_icon = self.STATUS_ICONS['ARROW_DOWN']
+            pnl_text = f"PnL={pnl_color}{pnl_icon}{abs(current_pnl):.2f}%{ConsoleColors.RESET}"
+        else:
+            pnl_text = ""
+        
+        # بناء الرسالة
+        parts = []
+        if pnl_text:
+            parts.append(pnl_text)
+        
+        parts.append(f"Phase={phase}")
+        parts.append(f"Action={ConsoleColors.CYAN}{action}{ConsoleColors.RESET}")
+        
+        # إضافة وقف الخسارة الجديد إذا كان موجوداً
+        if new_stop_loss is not None:
+            parts.append(f"NewSL={ConsoleColors.YELLOW}{new_stop_loss:.4f}{ConsoleColors.RESET}")
+        
+        # إضافة الكمية المقتطعة إذا كانت موجودة
+        if trimmed_qty is not None:
+            parts.append(f"Trimmed={ConsoleColors.LIGHT_MAGENTA}{trimmed_qty:.2f}{ConsoleColors.RESET}")
+        
+        # تفاصيل إضافية
+        if extra_details:
+            for key, value in extra_details.items():
+                parts.append(f"{key}={value}")
+        
+        message = f"{ConsoleColors.LIGHT_WHITE} | ".join(parts) + ConsoleColors.RESET
+        
+        # الطباعة
+        if self.show_timestamp:
+            print(f"{ConsoleColors.LIGHT_BLACK}[{self._format_timestamp()}]{ConsoleColors.RESET} {header} {message}")
+        else:
+            print(f"{header} {message}")
+        
+        # سبب الإجراء
+        if reason:
+            why_text = self._format_reason(reason)
+            indent = " " * (len(self._format_timestamp()) + 3 if self.show_timestamp else 0)
+            print(f"{indent}{why_text}")
+        
+        # تسجيل في الملف
+        self.file_logger.info(f"MANAGEMENT | Phase={phase} | Action={action} | Reason={reason}")
+    
+    def log_exit(self,
+                reason: str,
+                final_pnl: float,
+                risk_reward: Optional[float] = None,
+                exit_price: Optional[float] = None,
+                trade_duration: Optional[str] = None,
+                summary: Optional[Dict[str, Any]] = None):
+        """
+        طباعة الخروج من الصفقة
+        
+        Args:
+            reason: سبب الخروج
+            final_pnl: الربح/الخسارة النهائي (%)
+            risk_reward: نسبة المخاطرة/العائد (اختياري)
+            exit_price: سعر الخروج (اختياري)
+            trade_duration: مدة الصفقة (اختياري)
+            summary: ملخص الصفقة (اختياري)
+        """
+        header = self._get_layer_header(LogCategory.EXIT)
+        
+        # تحديد لون الربح/الخسارة والأيقونة
+        if final_pnl > 0:
+            pnl_color = ConsoleColors.GREEN
+            pnl_icon = self.STATUS_ICONS['ROCKET'] if final_pnl > 2 else self.STATUS_ICONS['FIRE']
+        else:
+            pnl_color = ConsoleColors.RED
+            pnl_icon = self.STATUS_ICONS['CROSS']
+        
+        # بناء الرسالة
+        parts = []
+        parts.append(f"Reason={reason}")
+        parts.append(f"PnL={pnl_color}{pnl_icon}{final_pnl:+.2f}%{ConsoleColors.RESET}")
+        
+        # إضافة نسبة المخاطرة/العائد إذا كانت موجودة
+        if risk_reward is not None:
+            if risk_reward >= 2:
+                rr_color = ConsoleColors.GREEN
+                rr_icon = self.STATUS_ICONS['STAR']
+            elif risk_reward >= 1:
+                rr_color = ConsoleColors.YELLOW
+                rr_icon = self.STATUS_ICONS['CHECK']
+            else:
+                rr_color = ConsoleColors.RED
+                rr_icon = self.STATUS_ICONS['WARNING']
+            parts.append(f"RR={rr_color}{rr_icon}1:{risk_reward:.1f}{ConsoleColors.RESET}")
+        
+        # إضافة سعر الخروج إذا كان موجوداً
+        if exit_price is not None:
+            parts.append(f"ExitPrice={exit_price:.4f}")
+        
+        # إضافة مدة الصفقة إذا كانت موجودة
+        if trade_duration:
+            parts.append(f"Duration={trade_duration}")
+        
+        message = f"{ConsoleColors.LIGHT_WHITE} | ".join(parts) + ConsoleColors.RESET
+        
+        # الطباعة
+        if self.show_timestamp:
+            print(f"{ConsoleColors.LIGHT_BLACK}[{self._format_timestamp()}]{ConsoleColors.RESET} {header} {message}")
+        else:
+            print(f"{header} {message}")
+        
+        # إضافة ملخص إذا كان موجوداً
+        if summary:
+            indent = " " * (len(self._format_timestamp()) + 3 if self.show_timestamp else 0)
+            print(f"{indent}{ConsoleColors.LIGHT_BLACK}{'─' * 60}{ConsoleColors.RESET}")
+            for key, value in summary.items():
+                print(f"{indent}{ConsoleColors.LIGHT_BLACK}{key}: {ConsoleColors.LIGHT_WHITE}{value}{ConsoleColors.RESET}")
+        
+        # إضافة خط فاصل مزدوج
+        print(f"{ConsoleColors.LIGHT_BLACK}{'═' * 80}{ConsoleColors.RESET}\n")
+        
+        # تسجيل في الملف
+        self.file_logger.info(f"EXIT | Reason={reason} | PnL={final_pnl:.2f}%")
+    
+    def log_system(self, message: str, status: str = "INFO", details: Optional[Dict] = None):
+        """
+        طباعة رسائل النظام
+        
+        Args:
+            message: الرسالة
+            status: الحالة (INFO/SUCCESS/ERROR/WARNING)
+            details: تفاصيل إضافية (اختياري)
+        """
+        header = self._get_layer_header(LogCategory.SYSTEM)
+        
+        # تحديد لون الحالة
+        if status == "SUCCESS":
+            status_color = ConsoleColors.GREEN
+            status_icon = self.STATUS_ICONS['SUCCESS']
+        elif status == "ERROR":
+            status_color = ConsoleColors.RED
+            status_icon = self.STATUS_ICONS['FAILURE']
+        elif status == "WARNING":
+            status_color = ConsoleColors.YELLOW
+            status_icon = self.STATUS_ICONS['WARNING']
+        else:
+            status_color = ConsoleColors.CYAN
+            status_icon = self.STATUS_ICONS['INFO']
+        
+        # إضافة التفاصيل إذا وجدت
+        details_str = ""
+        if details:
+            details_list = [f"{k}: {v}" for k, v in details.items()]
+            details_str = f" | {' | '.join(details_list)}"
+        
+        full_message = f"{status_color}{status_icon} {message}{details_str}{ConsoleColors.RESET}"
+        
+        if self.show_timestamp:
+            print(f"{ConsoleColors.LIGHT_BLACK}[{self._format_timestamp()}]{ConsoleColors.RESET} {header} {full_message}")
+        else:
+            print(f"{header} {full_message}")
+        
+        # تسجيل في الملف
+        self.file_logger.info(f"SYSTEM | {status} | {message}")
+    
+    def log_error(self, message: str, error: Optional[Exception] = None, context: Optional[str] = None):
+        """
+        طباعة الأخطاء
+        
+        Args:
+            message: رسالة الخطأ
+            error: كائن الاستثناء (اختياري)
+            context: السياق (اختياري)
+        """
+        header = self._get_layer_header(LogCategory.ERROR)
+        
+        # بناء الرسالة
+        error_msg = f"{self.STATUS_ICONS['ALERT']} {message}"
+        
+        if context:
+            error_msg += f" | Context: {context}"
+        
+        if error:
+            error_msg += f" | Error: {str(error)}"
+        
+        if self.show_timestamp:
+            print(f"{ConsoleColors.LIGHT_BLACK}[{self._format_timestamp()}]{ConsoleColors.RESET} {header} {ConsoleColors.RED}{error_msg}{ConsoleColors.RESET}")
+        else:
+            print(f"{header} {ConsoleColors.RED}{error_msg}{ConsoleColors.RESET}")
+        
+        # تسجيل في الملف
+        self.file_logger.error(f"ERROR | {message} | Error: {str(error) if error else 'N/A'} | Context: {context if context else 'N/A'}")
+    
+    def log_debug(self, message: str, data: Optional[Any] = None):
+        """
+        طباعة معلومات التصحيح
+        
+        Args:
+            message: الرسالة
+            data: البيانات (اختياري)
+        """
+        header = self._get_layer_header(LogCategory.DEBUG)
+        
+        if self.show_timestamp:
+            print(f"{ConsoleColors.LIGHT_BLACK}[{self._format_timestamp()}]{ConsoleColors.RESET} {header} {ConsoleColors.LIGHT_WHITE}{message}{ConsoleColors.RESET}")
+        else:
+            print(f"{header} {ConsoleColors.LIGHT_WHITE}{message}{ConsoleColors.RESET}")
+        
+        if data is not None:
+            indent = " " * (len(self._format_timestamp()) + 3 if self.show_timestamp else 0)
+            print(f"{indent}{ConsoleColors.LIGHT_BLACK}↳ {ConsoleColors.LIGHT_WHITE}{data}{ConsoleColors.RESET}")
+        
+        # تسجيل في الملف
+        self.file_logger.debug(f"DEBUG | {message}")
+    
     def log_plan(self, plan_details: Dict, title: str = "TRADE PLAN"):
         """
         تسجيل خطة التداول
@@ -353,9 +788,6 @@ class ProConsoleLogger:
         
         # تسجيل في الملف
         self.file_logger.warning(f"ENTRY BLOCKED | Reason: {reason} | Details: {details if details else 'N/A'}")
-
-    # بقية دوال اللوجر كما هي موجودة في الكود الأصلي
-    # ... (كل الدوال الأصلية تبقى كما هي)
 
 # إنشاء كائن اللوجر العام
 logger = ProConsoleLogger(show_timestamp=True, show_emoji=True)
@@ -905,6 +1337,98 @@ class SmartExitEngine:
         return 0.0  # لا خروج
 
 # ============================================
+#  EXECUTION GUARD - حماية التنفيذ
+# ============================================
+
+class ExecutionGuard:
+    """حارس تنفيذ الأوامر مع Bybit"""
+    
+    def __init__(self, exchange, logger: ProConsoleLogger):
+        self.exchange = exchange
+        self.logger = logger
+        self.last_failed_order = None
+        self.failure_count = 0
+        self.max_failures = 3
+        self.cooldown_until = 0
+        
+    def sanitize_order(self, symbol: str, qty: float) -> Tuple[Optional[float], str]:
+        """تنقية وتنظيم الكمية قبل الإرسال"""
+        try:
+            # جلب معلومات السوق
+            market = self.exchange.market(symbol)
+            
+            # الحد الأدنى للكمية
+            min_qty = market['limits']['amount']['min']
+            
+            # الدقة
+            precision = market['precision']['amount']
+            
+            # التقريب للدقة المطلوبة
+            qty = round(qty, precision)
+            
+            # التحقق من الحد الأدنى
+            if qty < min_qty:
+                self.logger.log_error(
+                    f"Quantity {qty} < Minimum {min_qty} → ORDER CANCELLED",
+                    context="Order Sanitization"
+                )
+                return None, f"Qty < Min: {qty} < {min_qty}"
+            
+            # التحقق من الحد الأقصى (إذا موجود)
+            if 'max' in market['limits']['amount']:
+                max_qty = market['limits']['amount']['max']
+                if qty > max_qty:
+                    qty = max_qty
+                    self.logger.log_system(f"Quantity capped at maximum: {max_qty}", "INFO")
+            
+            self.logger.log_debug(f"Sanitized Qty: {qty} (Min: {min_qty}, Precision: {precision})")
+            return qty, "VALID"
+            
+        except Exception as e:
+            self.logger.log_error(f"Sanitization error: {str(e)}", e, "Order Sanitization")
+            return None, f"Error: {str(e)}"
+    
+    def should_allow_order(self) -> Tuple[bool, str]:
+        """التحقق إذا كان مسموحاً بإرسال أمر جديد"""
+        current_time = time.time()
+        
+        # فحص التبريد بعد فشل سابق
+        if current_time < self.cooldown_until:
+            remaining = self.cooldown_until - current_time
+            return False, f"In cooldown: {int(remaining)}s remaining"
+        
+        # فحص عدد الفشل المتتالي
+        if self.failure_count >= self.max_failures:
+            self.cooldown_until = current_time + 300  # 5 دقائق تبريد
+            self.failure_count = 0
+            return False, "Max consecutive failures reached, 5min cooldown"
+        
+        return True, "Allowed"
+    
+    def record_success(self):
+        """تسجيل نجاح الأمر"""
+        self.failure_count = 0
+        self.last_failed_order = None
+        self.logger.log_debug("Order execution succeeded, resetting failure count")
+    
+    def record_failure(self, error: str):
+        """تسجيل فشل الأمر"""
+        self.failure_count += 1
+        self.last_failed_order = {
+            'time': time.time(),
+            'error': error
+        }
+        
+        # تفعيل التبريد إذا فشلت أمرين متتاليين
+        if self.failure_count >= 2:
+            self.cooldown_until = time.time() + 60  # 1 دقيقة تبريد
+        
+        self.logger.log_error(
+            f"Order failed ({self.failure_count}/{self.max_failures}): {error}",
+            context="Order Execution"
+        )
+
+# ============================================
 #  SMART TRADE MANAGER - المدير الرئيسي (محدث)
 # ============================================
 
@@ -1298,8 +1822,428 @@ class SmartTradeManager:
             }
         )
     
-    # بقية الدوال تبقى كما هي مع تعديلات طفيفة للتوافق
-    # ... (الدوال المساعدة)
+    def calculate_profit_pct(self, current_price: float) -> float:
+        """حساب نسبة الربح/الخسارة الحالية"""
+        if not self.active_trade or not self.current_position['entry_price']:
+            return 0.0
+        
+        if self.current_position['side'] == "BUY":
+            return ((current_price - self.current_position['entry_price']) / self.current_position['entry_price']) * 100
+        else:
+            return ((self.current_position['entry_price'] - current_price) / self.current_position['entry_price']) * 100
+    
+    def _should_hit_stop_loss(self, current_price: float, stop_loss: float) -> bool:
+        """التحقق من ضرب وقف الخسارة"""
+        if self.trade_phase_engine.side == "BUY":
+            return current_price <= stop_loss
+        else:
+            return current_price >= stop_loss
+    
+    def _update_trade_phase(self, current_price: float, candles: List[Dict]):
+        """تحديث مرحلة الصفقة (وظيفة مساعدة)"""
+        # هذه وظيفة مساعدة أساسية
+        pass
+    
+    def execute_order(self, side: str, qty: float, price: float, 
+                      is_open: bool = True) -> bool:
+        """تنفيذ الأمر (محاكاة أو حقيقي)"""
+        # هذا مثال للتنفيذ المحاكى
+        # في التنفيذ الحقيقي، استخدم exchange.create_order()
+        
+        global DRY_RUN, EXECUTE_ORDERS
+        
+        if DRY_RUN or not EXECUTE_ORDERS:
+            order_type = "OPEN" if is_open else "CLOSE"
+            self.logger.log_debug(
+                f"DRY RUN: {order_type} {side.upper()} {qty:.4f} @ {price:.6f}",
+                {"Side": side.upper(), "Qty": qty, "Price": price, "Type": order_type}
+            )
+            return True
+        
+        try:
+            # تنفيذ حقيقي
+            params = {"reduceOnly": not is_open}
+            order = self.exchange.create_order(
+                self.symbol, 
+                "market", 
+                side, 
+                qty, 
+                None, 
+                params
+            )
+            
+            self.logger.log_system(
+                f"ORDER FILLED: {'OPEN' if is_open else 'CLOSE'} {side.upper()} {qty:.4f} @ {price:.6f}",
+                "SUCCESS",
+                {"Side": side.upper(), "Qty": f"{qty:.4f}", "Price": f"{price:.6f}", "Order_ID": order.get('id', 'N/A')}
+            )
+            
+            self.execution_guard.record_success()
+            return True
+            
+        except Exception as e:
+            error_msg = str(e)
+            self.logger.log_error(f"Order execution failed: {error_msg}", e, "Order Execution")
+            self.execution_guard.record_failure(error_msg)
+            return False
+    
+    def get_trade_report(self) -> Dict:
+        """تقرير عن أداء الصفقات"""
+        total_trades = len(self.trades_history)
+        winning_trades = len([t for t in self.trades_history if t.get('pnl_pct', 0) > 0])
+        losing_trades = total_trades - winning_trades
+        
+        # حساب متوسط الربح/الخسارة
+        if total_trades > 0:
+            avg_pnl = sum(t.get('pnl_pct', 0) for t in self.trades_history) / total_trades
+            win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
+            
+            # أفضل وأسوأ صفقة
+            winning_trades_list = [t for t in self.trades_history if t.get('pnl_pct', 0) > 0]
+            losing_trades_list = [t for t in self.trades_history if t.get('pnl_pct', 0) < 0]
+            
+            best_trade = max(self.trades_history, key=lambda x: x.get('pnl_pct', 0)) if self.trades_history else None
+            worst_trade = min(self.trades_history, key=lambda x: x.get('pnl_pct', 0)) if self.trades_history else None
+            
+            # إجمالي الربح/الخسارة
+            total_pnl_usd = sum(t.get('pnl_usd', 0) for t in self.trades_history)
+        else:
+            avg_pnl = 0
+            win_rate = 0
+            best_trade = None
+            worst_trade = None
+            total_pnl_usd = 0
+        
+        return {
+            'total_trades': total_trades,
+            'winning_trades': winning_trades,
+            'losing_trades': losing_trades,
+            'win_rate': win_rate,
+            'avg_pnl': avg_pnl,
+            'total_pnl_pct': self.total_pnl,
+            'total_pnl_usd': total_pnl_usd,
+            'active_trade': self.active_trade,
+            'current_state': self.trade_phase_engine.current_state if self.trade_phase_engine else None,
+            'best_trade': best_trade,
+            'worst_trade': worst_trade,
+            'recent_trades': self.trades_history[-5:] if self.trades_history else [],
+            'current_position': self.current_position if self.active_trade else None,
+            'fail_fast_exits': self.fail_fast_exits
+        }
+
+# ============================================
+#  MARKET ANALYZER - محلل السوق (من الكود الأصلي)
+# ============================================
+
+class MarketAnalyzer:
+    """محلل السوق المتقدم"""
+    
+    def __init__(self, logger: ProConsoleLogger):
+        self.logger = logger
+        self.market_states = deque(maxlen=100)  # حفظ آخر 100 حالة سوق
+        
+    def analyze_market(self, df: pd.DataFrame, timeframe: str = "15m") -> Dict[str, Any]:
+        """
+        تحليل شامل للسوق
+        
+        Args:
+            df: بيانات OHLCV
+            timeframe: الإطار الزمني
+            
+        Returns:
+            dict: نتائج التحليل
+        """
+        if df.empty or len(df) < 20:
+            return {"error": "Insufficient data"}
+        
+        try:
+            # تحليل الاتجاه
+            trend = self._analyze_trend(df)
+            
+            # تحليل الهيكل
+            structure = self._analyze_structure(df)
+            
+            # تحليل السيولة
+            liquidity = self._analyze_liquidity(df)
+            
+            # تحليل الزخم
+            momentum = self._analyze_momentum(df)
+            
+            # تحليل الحجم
+            volume_profile = self._analyze_volume(df)
+            
+            # سبب التحليل
+            reason = self._generate_analysis_reason(trend, structure, liquidity)
+            
+            # حفظ حالة السوق
+            market_state = {
+                'timestamp': datetime.now().isoformat(),
+                'trend': trend,
+                'structure': structure,
+                'liquidity': liquidity,
+                'momentum': momentum,
+                'timeframe': timeframe
+            }
+            self.market_states.append(market_state)
+            
+            # لوج حالة السوق
+            self.logger.log_market(
+                timeframe=timeframe,
+                trend=trend['direction'],
+                structure=structure['type'],
+                liquidity=liquidity['level'],
+                momentum=momentum['score'],
+                volume_profile=volume_profile['profile'],
+                reason=reason,
+                extra_details={
+                    'Trend_Strength': f"{trend['strength']:.1f}",
+                    'Structure_Level': structure['key_level'],
+                    'Liquidity_Zone': liquidity['zone'],
+                    'Momentum_Direction': momentum['direction']
+                }
+            )
+            
+            return {
+                'trend': trend,
+                'structure': structure,
+                'liquidity': liquidity,
+                'momentum': momentum,
+                'volume': volume_profile,
+                'reason': reason,
+                'timestamp': datetime.now().isoformat(),
+                'timeframe': timeframe
+            }
+            
+        except Exception as e:
+            self.logger.log_error(f"Market analysis error: {str(e)}", e, "Market Analysis")
+            return {"error": str(e)}
+    
+    def _analyze_trend(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """تحليل الاتجاه"""
+        closes = df['close'].astype(float).values
+        
+        # استخدام SMA قصيرة وطويلة الأجل
+        sma_short = self._calculate_sma(closes, 9)
+        sma_long = self._calculate_sma(closes, 21)
+        
+        # تحديد الاتجاه
+        if sma_short > sma_long:
+            direction = "BULL"
+            strength = ((sma_short - sma_long) / sma_long) * 100
+        elif sma_short < sma_long:
+            direction = "BEAR"
+            strength = ((sma_long - sma_short) / sma_short) * 100
+        else:
+            direction = "SIDEWAYS"
+            strength = 0
+        
+        # تأكيد الاتجاه باستخدام آخر 5 شمعات
+        recent_closes = closes[-5:]
+        if direction == "BULL":
+            if all(recent_closes[i] <= recent_closes[i+1] for i in range(len(recent_closes)-1)):
+                strength += 10  # زيادة القوة
+        elif direction == "BEAR":
+            if all(recent_closes[i] >= recent_closes[i+1] for i in range(len(recent_closes)-1)):
+                strength += 10  # زيادة القوة
+        
+        return {
+            'direction': direction,
+            'strength': abs(strength),
+            'sma_short': sma_short,
+            'sma_long': sma_long,
+            'confirmed': abs(strength) > 1.0
+        }
+    
+    def _analyze_structure(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """تحليل الهيكل السعري"""
+        highs = df['high'].astype(float).values
+        lows = df['low'].astype(float).values
+        
+        # البحث عن قمم وقيعان محلية
+        swing_highs = []
+        swing_lows = []
+        
+        for i in range(2, len(highs) - 2):
+            if highs[i] > highs[i-1] and highs[i] > highs[i-2] and highs[i] > highs[i+1] and highs[i] > highs[i+2]:
+                swing_highs.append({'index': i, 'price': highs[i]})
+            if lows[i] < lows[i-1] and lows[i] < lows[i-2] and lows[i] < lows[i+1] and lows[i] < lows[i+2]:
+                swing_lows.append({'index': i, 'price': lows[i]})
+        
+        # تحديد نوع الهيكل
+        if len(swing_highs) >= 2 and len(swing_lows) >= 2:
+            # Higher Highs و Higher Lows = BOS صاعد
+            if swing_highs[-1]['price'] > swing_highs[-2]['price'] and swing_lows[-1]['price'] > swing_lows[-2]['price']:
+                structure_type = "BOS_UP"
+                key_level = swing_lows[-1]['price'] if swing_lows else None
+            # Lower Highs و Lower Lows = BOS هابط
+            elif swing_highs[-1]['price'] < swing_highs[-2]['price'] and swing_lows[-1]['price'] < swing_lows[-2]['price']:
+                structure_type = "BOS_DOWN"
+                key_level = swing_highs[-1]['price'] if swing_highs else None
+            else:
+                structure_type = "CONSOLIDATION"
+                key_level = (max(highs[-10:]) + min(lows[-10:])) / 2
+        else:
+            structure_type = "NO_CLEAR_STRUCTURE"
+            key_level = None
+        
+        return {
+            'type': structure_type,
+            'key_level': key_level,
+            'swing_highs': swing_highs[-3:] if swing_highs else [],
+            'swing_lows': swing_lows[-3:] if swing_lows else []
+        }
+    
+    def _analyze_liquidity(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """تحليل السيولة"""
+        highs = df['high'].astype(float).values
+        lows = df['low'].astype(float).values
+        volumes = df['volume'].astype(float).values
+        
+        # تحليل السيولة بناءً على حجم التداول والمدى السعري
+        avg_volume = np.mean(volumes[-10:])
+        current_volume = volumes[-1]
+        volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1
+        
+        # تحليل نطاق السعر
+        price_range = max(highs[-10:]) - min(lows[-10:])
+        current_range = highs[-1] - lows[-1]
+        range_ratio = current_range / price_range if price_range > 0 else 1
+        
+        # تحديد مستوى السيولة
+        if volume_ratio > 1.5 and range_ratio > 1.2:
+            level = "HIGH"
+            zone = "EXPANSION"
+        elif volume_ratio > 1.2 and range_ratio > 1.0:
+            level = "MEDIUM_HIGH"
+            zone = "ACTIVE"
+        elif volume_ratio > 0.8 and range_ratio > 0.8:
+            level = "MEDIUM"
+            zone = "NORMAL"
+        elif volume_ratio > 0.5:
+            level = "LOW"
+            zone = "THIN"
+        else:
+            level = "VERY_LOW"
+            zone = "ILLIQUID"
+        
+        return {
+            'level': level,
+            'zone': zone,
+            'volume_ratio': volume_ratio,
+            'range_ratio': range_ratio,
+            'current_volume': current_volume,
+            'avg_volume': avg_volume
+        }
+    
+    def _analyze_momentum(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """تحليل الزخم"""
+        closes = df['close'].astype(float).values
+        
+        if len(closes) < 14:
+            return {'score': 0, 'direction': 'NEUTRAL'}
+        
+        # حساب RSI
+        rsi = self._calculate_rsi(closes, 14)
+        
+        # حساب معدل التغير
+        roc = ((closes[-1] - closes[-5]) / closes[-5]) * 100
+        
+        # تحديد اتجاه الزخم
+        if rsi > 70:
+            momentum_direction = "OVERBOUGHT"
+            score = (rsi - 70) / 30  # تطبيع بين 0-1
+        elif rsi < 30:
+            momentum_direction = "OVERSOLD"
+            score = (30 - rsi) / 30  # تطبيع بين 0-1
+        elif roc > 0:
+            momentum_direction = "BULLISH"
+            score = min(abs(roc) / 5, 1)  # تطبيع
+        elif roc < 0:
+            momentum_direction = "BEARISH"
+            score = min(abs(roc) / 5, 1)  # تطبيع
+        else:
+            momentum_direction = "NEUTRAL"
+            score = 0
+        
+        return {
+            'score': score,
+            'direction': momentum_direction,
+            'rsi': rsi,
+            'roc': roc,
+            'strength': "STRONG" if score > 0.7 else "MODERATE" if score > 0.3 else "WEAK"
+        }
+    
+    def _analyze_volume(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """تحليل الحجم"""
+        volumes = df['volume'].astype(float).values
+        
+        if len(volumes) < 10:
+            return {'profile': 'UNKNOWN', 'trend': 'UNKNOWN'}
+        
+        # تحليل اتجاه الحجم
+        recent_volumes = volumes[-5:]
+        avg_volume = np.mean(volumes[-10:])
+        
+        volume_trend = "INCREASING" if recent_volumes[-1] > recent_volumes[0] else "DECREASING" if recent_volumes[-1] < recent_volumes[0] else "STABLE"
+        
+        # تحديد ملف الحجم
+        if recent_volumes[-1] > avg_volume * 1.5:
+            profile = "HIGH_ACCUMULATION" if volume_trend == "INCREASING" else "HIGH_DISTRIBUTION"
+        elif recent_volumes[-1] > avg_volume * 1.2:
+            profile = "MODERATE_ACCUMULATION" if volume_trend == "INCREASING" else "MODERATE_DISTRIBUTION"
+        elif recent_volumes[-1] > avg_volume * 0.8:
+            profile = "NORMAL"
+        else:
+            profile = "LOW_PARTICIPATION"
+        
+        return {
+            'profile': profile,
+            'trend': volume_trend,
+            'current': recent_volumes[-1],
+            'average': avg_volume,
+            'ratio': recent_volumes[-1] / avg_volume if avg_volume > 0 else 1
+        }
+    
+    def _generate_analysis_reason(self, trend: Dict, structure: Dict, liquidity: Dict) -> str:
+        """توليد سبب التحليل"""
+        reasons = []
+        
+        if trend['confirmed']:
+            reasons.append(f"Trend: {trend['direction']} (Strength: {trend['strength']:.1f})")
+        
+        if structure['type'] != "NO_CLEAR_STRUCTURE":
+            reasons.append(f"Structure: {structure['type']}")
+        
+        if liquidity['level'] in ["HIGH", "MEDIUM_HIGH"]:
+            reasons.append(f"Liquidity: {liquidity['level']} ({liquidity['zone']})")
+        
+        if reasons:
+            return " | ".join(reasons)
+        return "No clear market signals"
+    
+    def _calculate_sma(self, prices: np.ndarray, period: int) -> float:
+        """حساب المتوسط المتحرك البسيط"""
+        if len(prices) < period:
+            return float(prices[-1]) if len(prices) > 0 else 0
+        return float(np.mean(prices[-period:]))
+    
+    def _calculate_rsi(self, prices: np.ndarray, period: int = 14) -> float:
+        """حساب مؤشر RSI"""
+        if len(prices) < period + 1:
+            return 50.0
+        
+        deltas = np.diff(prices)
+        seed = deltas[:period+1]
+        up = seed[seed >= 0].sum() / period
+        down = -seed[seed < 0].sum() / period
+        
+        if down == 0:
+            return 100.0
+        
+        rs = up / down
+        rsi = 100.0 - (100.0 / (1.0 + rs))
+        
+        return rsi
 
 # ============================================
 #  SIGNAL GENERATOR - مولد الإشارات (محدث)
@@ -2187,6 +3131,60 @@ def create_dashboard_html():
     </body>
     </html>
     '''
+
+@app.route('/')
+def dashboard():
+    """لوحة التحكم الرئيسية"""
+    return render_template_string(create_dashboard_html())
+
+@app.route('/health')
+def health_check():
+    """فحص صحة النظام"""
+    if bot_instance and bot_instance.running:
+        return jsonify({
+            'status': 'healthy',
+            'bot_version': BOT_VERSION,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+    return jsonify({'status': 'unhealthy', 'error': 'Bot not running'}), 503
+
+@app.route('/api/status')
+def api_status():
+    """حالة البوت والإحصائيات"""
+    if bot_instance:
+        return jsonify(bot_instance.get_status_report())
+    return jsonify({'error': 'Bot not initialized'}), 500
+
+@app.route('/api/trades')
+def api_trades():
+    """الحصول على تاريخ الصفقات"""
+    if bot_instance and bot_instance.smart_trade_manager:
+        return jsonify({
+            'trades': bot_instance.smart_trade_manager.trades_history,
+            'total_trades': len(bot_instance.smart_trade_manager.trades_history),
+            'timestamp': datetime.now().isoformat()
+        })
+    return jsonify({'error': 'Trade manager not available'}), 500
+
+@app.route('/api/trade/action', methods=['POST'])
+def trade_action():
+    """إجراء يدوي على الصفقة (لحالات الطوارئ)"""
+    # هذه الدالة للاستخدام في حالات الطوارئ فقط
+    if not bot_instance or not bot_instance.smart_trade_manager:
+        return jsonify({'error': 'Bot not initialized'}), 500
+    
+    # في الواقع، يجب التحقق من البيانات المرسلة
+    # لكن لأغراض التوضيح، سنقوم بإغلاق أي صفقة نشطة
+    
+    if bot_instance.smart_trade_manager.active_trade:
+        current_price = get_current_price(bot_instance.exchange, SYMBOL)
+        if current_price:
+            bot_instance.smart_trade_manager.close_trade("Manual emergency close", current_price)
+            return jsonify({'message': 'Trade closed manually', 'price': current_price}), 200
+        else:
+            return jsonify({'error': 'Cannot get current price'}), 500
+    
+    return jsonify({'message': 'No active trade to close'}), 200
 
 # ============================================
 #  MAIN EXECUTION - التنفيذ الرئيسي
