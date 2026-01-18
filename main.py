@@ -187,6 +187,271 @@ class ConfidenceEngine:
             return "VERY_LOW"
 
 # ============================================
+#  MARKET ANALYZER - محلل السوق الكامل
+# ============================================
+
+class MarketAnalyzer:
+    """محلل السوق المتقدم مع كل الدوال المطلوبة"""
+    
+    def __init__(self):
+        self.market_states = deque(maxlen=100)
+        
+    def analyze_market(self, df: pd.DataFrame, timeframe: str = "15m") -> Dict[str, Any]:
+        """
+        تحليل شامل للسوق
+        """
+        if df.empty or len(df) < 20:
+            slog("ERROR", "Insufficient data for market analysis", level="ERROR")
+            return {"error": "Insufficient data"}
+        
+        try:
+            # تحليل الاتجاه
+            trend = self._analyze_trend(df)
+            
+            # تحليل الهيكل
+            structure = self._analyze_structure(df)
+            
+            # تحليل السيولة
+            liquidity = self._analyze_liquidity(df)
+            
+            # تحليل الزخم
+            momentum = self._analyze_momentum(df)
+            
+            # تحليل الحجم
+            volume_profile = self._analyze_volume(df)
+            
+            # سبب التحليل
+            reason = self._generate_analysis_reason(trend, structure, liquidity)
+            
+            # حفظ حالة السوق
+            market_state = {
+                'timestamp': datetime.now().isoformat(),
+                'trend': trend,
+                'structure': structure,
+                'liquidity': liquidity,
+                'momentum': momentum,
+                'timeframe': timeframe
+            }
+            self.market_states.append(market_state)
+            
+            # لوج حالة السوق
+            slog("MARKET",
+                f"TF={timeframe} | Trend={trend['direction']} | Structure={structure['type']} | Liquidity={liquidity['level']}",
+                level="INFO")
+            
+            return {
+                'trend': trend,
+                'structure': structure,
+                'liquidity': liquidity,
+                'momentum': momentum,
+                'volume': volume_profile,
+                'reason': reason,
+                'timestamp': datetime.now().isoformat(),
+                'timeframe': timeframe
+            }
+            
+        except Exception as e:
+            slog("ERROR", f"Market analysis error: {str(e)}", level="ERROR")
+            return {"error": str(e)}
+    
+    def _analyze_trend(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """تحليل الاتجاه"""
+        if len(df) < 21:
+            return {"direction": "NEUTRAL", "strength": 0, "confirmed": False}
+        
+        # حساب المتوسطات المتحركة
+        closes = df['close'].astype(float).values
+        sma_short = self._calculate_sma(closes, 9)
+        sma_long = self._calculate_sma(closes, 21)
+        
+        # تحديد الاتجاه
+        if sma_short > sma_long:
+            direction = "BULL"
+            strength = ((sma_short - sma_long) / sma_long) * 100
+        elif sma_short < sma_long:
+            direction = "BEAR"
+            strength = ((sma_long - sma_short) / sma_short) * 100
+        else:
+            direction = "SIDEWAYS"
+            strength = 0
+        
+        # تحليل تأكيد الاتجاه
+        confirmed = abs(strength) > 1.0
+        
+        return {
+            'direction': direction,
+            'strength': abs(strength),
+            'sma_short': sma_short,
+            'sma_long': sma_long,
+            'confirmed': confirmed
+        }
+    
+    def _analyze_structure(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """تحليل الهيكل السعري"""
+        if len(df) < 10:
+            return {"type": "NO_CLEAR_STRUCTURE", "key_level": None}
+        
+        highs = df['high'].astype(float).values
+        lows = df['low'].astype(float).values
+        
+        # البحث عن Higher Highs و Lower Lows
+        recent_highs = highs[-5:]
+        recent_lows = lows[-5:]
+        
+        # تحليل الهيكل البسيط
+        if len(recent_highs) >= 2 and len(recent_lows) >= 2:
+            # Higher Highs و Higher Lows
+            if (recent_highs[-1] > recent_highs[-2] and 
+                recent_lows[-1] > recent_lows[-2]):
+                return {"type": "BOS_UP", "key_level": recent_lows[-1]}
+            
+            # Lower Highs و Lower Lows
+            elif (recent_highs[-1] < recent_highs[-2] and 
+                  recent_lows[-1] < recent_lows[-2]):
+                return {"type": "BOS_DOWN", "key_level": recent_highs[-1]}
+            
+            # الهيكل الجانبي
+            else:
+                return {"type": "CONSOLIDATION", "key_level": (max(highs[-10:]) + min(lows[-10:])) / 2}
+        
+        return {"type": "NO_CLEAR_STRUCTURE", "key_level": None}
+    
+    def _analyze_liquidity(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """تحليل السيولة"""
+        if len(df) < 10:
+            return {"level": "UNKNOWN", "volume_ratio": 1.0}
+        
+        # تحليل الحجم
+        volumes = df['volume'].astype(float).values
+        current_volume = volumes[-1]
+        avg_volume = np.mean(volumes[-10:])
+        volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1.0
+        
+        # تحديد مستوى السيولة
+        if volume_ratio > 1.5:
+            level = "HIGH"
+        elif volume_ratio > 1.2:
+            level = "MEDIUM_HIGH"
+        elif volume_ratio > 0.8:
+            level = "MEDIUM"
+        elif volume_ratio > 0.5:
+            level = "LOW"
+        else:
+            level = "VERY_LOW"
+        
+        return {
+            'level': level,
+            'volume_ratio': volume_ratio,
+            'current_volume': current_volume,
+            'avg_volume': avg_volume
+        }
+    
+    def _analyze_momentum(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """تحليل الزخم"""
+        if len(df) < 14:
+            return {"score": 0, "direction": "NEUTRAL"}
+        
+        # حساب معدل التغير
+        closes = df['close'].astype(float).values
+        roc = ((closes[-1] - closes[-5]) / closes[-5]) * 100 if closes[-5] > 0 else 0
+        
+        # تحديد اتجاه الزخم
+        if roc > 2.0:
+            direction = "STRONG_BULLISH"
+            score = min(abs(roc) / 10, 1.0)
+        elif roc > 0.5:
+            direction = "BULLISH"
+            score = min(abs(roc) / 10, 1.0)
+        elif roc < -2.0:
+            direction = "STRONG_BEARISH"
+            score = min(abs(roc) / 10, 1.0)
+        elif roc < -0.5:
+            direction = "BEARISH"
+            score = min(abs(roc) / 10, 1.0)
+        else:
+            direction = "NEUTRAL"
+            score = 0
+        
+        return {
+            'score': score,
+            'direction': direction,
+            'roc': roc
+        }
+    
+    def _analyze_volume(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """تحليل الحجم"""
+        if len(df) < 10:
+            return {"profile": "UNKNOWN", "trend": "UNKNOWN"}
+        
+        volumes = df['volume'].astype(float).values
+        
+        # اتجاه الحجم
+        recent_volumes = volumes[-5:]
+        volume_trend = "INCREASING" if recent_volumes[-1] > recent_volumes[0] else "DECREASING" if recent_volumes[-1] < recent_volumes[0] else "STABLE"
+        
+        # تحديد ملف الحجم
+        avg_volume = np.mean(volumes[-10:])
+        current_volume = volumes[-1]
+        
+        if current_volume > avg_volume * 1.5:
+            profile = "HIGH_ACCUMULATION" if volume_trend == "INCREASING" else "HIGH_DISTRIBUTION"
+        elif current_volume > avg_volume * 1.2:
+            profile = "MODERATE_ACCUMULATION" if volume_trend == "INCREASING" else "MODERATE_DISTRIBUTION"
+        elif current_volume > avg_volume * 0.8:
+            profile = "NORMAL"
+        else:
+            profile = "LOW_PARTICIPATION"
+        
+        return {
+            'profile': profile,
+            'trend': volume_trend,
+            'current': current_volume,
+            'average': avg_volume,
+            'ratio': current_volume / avg_volume if avg_volume > 0 else 1
+        }
+    
+    def _generate_analysis_reason(self, trend: Dict, structure: Dict, liquidity: Dict) -> str:
+        """توليد سبب التحليل"""
+        reasons = []
+        
+        if trend['confirmed']:
+            reasons.append(f"Trend: {trend['direction']} (Strength: {trend['strength']:.1f})")
+        
+        if structure['type'] != "NO_CLEAR_STRUCTURE":
+            reasons.append(f"Structure: {structure['type']}")
+        
+        if liquidity['level'] in ["HIGH", "MEDIUM_HIGH"]:
+            reasons.append(f"Liquidity: {liquidity['level']}")
+        
+        if reasons:
+            return " | ".join(reasons)
+        return "No clear market signals"
+    
+    def _calculate_sma(self, prices: np.ndarray, period: int) -> float:
+        """حساب المتوسط المتحرك البسيط"""
+        if len(prices) < period:
+            return float(prices[-1]) if len(prices) > 0 else 0
+        return float(np.mean(prices[-period:]))
+    
+    def _calculate_rsi(self, prices: np.ndarray, period: int = 14) -> float:
+        """حساب مؤشر RSI"""
+        if len(prices) < period + 1:
+            return 50.0
+        
+        deltas = np.diff(prices)
+        seed = deltas[:period+1]
+        up = seed[seed >= 0].sum() / period
+        down = -seed[seed < 0].sum() / period
+        
+        if down == 0:
+            return 100.0
+        
+        rs = up / down
+        rsi = 100.0 - (100.0 / (1.0 + rs))
+        
+        return rsi
+
+# ============================================
 #  EXPLOSION & RE-ENTRY ENGINE - كشف الانفجار وإعادة الدخول
 # ============================================
 
@@ -434,19 +699,15 @@ class ExplosionReEntryEngine:
             side = details['side']
             current_price = details['current_price']
             
-            # بناء خطة الصفقة الجديدة
-            from market_intelligence import MarketIntelligence  # استيراد افتراضي
-            market_intel = MarketIntelligence()
-            liquidity_zones = market_intel.detect_liquidity_zones(df)
-            
             # تحليل السوق المبسط
             market_analysis = {
                 'trend': {'direction': side, 'strength': 2.0},
                 'liquidity_sweep': True,
-                'volume_spike': False
+                'volume_spike': False,
+                'structure': {'type': 'BOS_UP' if side == 'BUY' else 'BOS_DOWN'}
             }
             
-            # بناء الخطة (دالة افتراضية - تحتاج للتنفيذ الفعلي)
+            # بناء الخطة
             trade_plan = smart_manager.build_trade_plan(
                 side, current_price, market_analysis, df
             )
@@ -798,6 +1059,12 @@ class SmartTradeManager:
         
         plan = TradePlan(side=side, trend_class=trend_class)
         
+        # إضافة أسباب الدخول
+        plan.entry_reason["liquidity"] = "SWEEP"
+        plan.entry_reason["zone"] = "DEMAND" if side == "BUY" else "SUPPLY"
+        plan.entry_reason["structure"] = structure_type
+        plan.entry_reason["confirmation"] = "REJECTION"
+        
         # حساب مستويات أساسية (مبسطة للتوضيح)
         if side == "BUY":
             plan.sl = current_price * 0.99
@@ -1051,73 +1318,6 @@ class SmartTradeManager:
             'recent_trades': self.trades_history[-5:] if self.trades_history else [],
             'current_position': self.current_position if self.active_trade else None
         }
-
-# ============================================
-#  MARKET ANALYZER - محلل السوق
-# ============================================
-
-class MarketAnalyzer:
-    """محلل السوق المتقدم"""
-    
-    def __init__(self):
-        self.market_states = deque(maxlen=100)
-        
-    def analyze_market(self, df: pd.DataFrame, timeframe: str = "15m") -> Dict[str, Any]:
-        """
-        تحليل شامل للسوق
-        """
-        if df.empty or len(df) < 20:
-            return {"error": "Insufficient data"}
-        
-        try:
-            # تحليل الاتجاه
-            trend = self._analyze_trend(df)
-            
-            # تحليل الهيكل
-            structure = self._analyze_structure(df)
-            
-            # تحليل السيولة
-            liquidity = self._analyze_liquidity(df)
-            
-            # تحليل الزخم
-            momentum = self._analyze_momentum(df)
-            
-            # تحليل الحجم
-            volume_profile = self._analyze_volume(df)
-            
-            # سبب التحليل
-            reason = self._generate_analysis_reason(trend, structure, liquidity)
-            
-            # حفظ حالة السوق
-            market_state = {
-                'timestamp': datetime.now().isoformat(),
-                'trend': trend,
-                'structure': structure,
-                'liquidity': liquidity,
-                'momentum': momentum,
-                'timeframe': timeframe
-            }
-            self.market_states.append(market_state)
-            
-            # لوج حالة السوق
-            slog("MARKET",
-                f"TF={timeframe} | Trend={trend['direction']} | Structure={structure['type']} | Liquidity={liquidity['level']}",
-                level="INFO")
-            
-            return {
-                'trend': trend,
-                'structure': structure,
-                'liquidity': liquidity,
-                'momentum': momentum,
-                'volume': volume_profile,
-                'reason': reason,
-                'timestamp': datetime.now().isoformat(),
-                'timeframe': timeframe
-            }
-            
-        except Exception as e:
-            slog("ERROR", f"Market analysis error: {str(e)}", level="ERROR")
-            return {"error": str(e)}
 
 # ============================================
 #  SIGNAL GENERATOR - مولد الإشارات
