@@ -2,7 +2,7 @@
 """
 SUI ULTRA PRO AI BOT - الإصدار الذكي المتقدم المتكامل المتطور
 • مجلس الإدارة الفائق الذكي مع 25 استراتيجية متقدمة
-• نظام ركوب الترند الذكي المحترف لتحقيق أقصى ربح متتالي
+• نظام ركوب الترند الذكي المحترف لتحقيق أقصى رحم متتالي
 • السكالب الفائق الذكي بأهداف متعددة محسوبة
 • إدارة صفقات ذكية متكيفة مع قوة الترند
 • نظام Footprint + Diagonal Order-Flow المتقدم
@@ -650,6 +650,8 @@ class SmartTradeManager:
         self.win_rate = 0.0
         self.avg_win = 0.0
         self.avg_loss = 0.0
+        self.total_profit = 0.0
+        self.starting_balance = None
         
     def record_trade(self, side, entry, exit_price, quantity, profit, duration):
         """تسجيل الصفقة في السجل"""
@@ -666,6 +668,7 @@ class SmartTradeManager:
         
         self.trade_history.append(trade)
         self.daily_profit += profit
+        self.total_profit += profit
         
         if profit > 0:
             self.consecutive_wins += 1
@@ -685,7 +688,7 @@ class SmartTradeManager:
         wins = [t for t in self.trade_history if t['profit'] > 0]
         losses = [t for t in self.trade_history if t['profit'] <= 0]
         
-        self.win_rate = len(wins) / len(self.trade_history) * 100
+        self.win_rate = len(wins) / len(self.trade_history) * 100 if self.trade_history else 0.0
         
         if wins:
             self.avg_win = sum(t['profit'] for t in wins) / len(wins)
@@ -726,30 +729,121 @@ market_analyzer = AdvancedMarketAnalyzer()
 trade_manager = SmartTradeManager()
 market_structure = MarketStructureAnalyzer()
 
-# =================== PROFESSIONAL LOGGING ===================
+# =================== ENHANCED PROFESSIONAL LOGGING ===================
 def log_i(msg): 
-    print(f"ℹ️ {datetime.now().strftime('%H:%M:%S')} {msg}", flush=True)
+    print(colored(f"ℹ️ {datetime.now().strftime('%H:%M:%S')} {msg}", 'cyan'), flush=True)
 
 def log_g(msg): 
-    print(f"✅ {datetime.now().strftime('%H:%M:%S')} {msg}", flush=True)
+    print(colored(f"✅ {datetime.now().strftime('%H:%M:%S')} {msg}", 'green'), flush=True)
 
 def log_w(msg): 
-    print(f"🟨 {datetime.now().strftime('%H:%M:%S')} {msg}", flush=True)
+    print(colored(f"🟨 {datetime.now().strftime('%H:%M:%S')} {msg}", 'yellow'), flush=True)
 
 def log_e(msg): 
-    print(f"❌ {datetime.now().strftime('%H:%M:%S')} {msg}", flush=True)
+    print(colored(f"❌ {datetime.now().strftime('%H:%M:%S')} {msg}", 'red'), flush=True)
 
 def log_banner(text): 
-    print(f"\n{'—'*12} {text} {'—'*12}\n", flush=True)
+    print(colored(f"\n{'—'*12} {text} {'—'*12}\n", 'magenta', attrs=['bold']), flush=True)
+
+def log_portfolio_status(balance=None, show_profit=True):
+    """تسجيل حالة المحفظة والأرباح"""
+    try:
+        if balance is None:
+            balance = balance_usdt()
+        
+        daily_profit = trade_manager.daily_profit
+        total_profit = trade_manager.total_profit
+        
+        # تحديد لون الأرباح
+        if daily_profit > 0:
+            daily_color = 'green'
+            daily_icon = '📈'
+        elif daily_profit < 0:
+            daily_color = 'red'
+            daily_icon = '📉'
+        else:
+            daily_color = 'yellow'
+            daily_icon = '📊'
+        
+        if total_profit > 0:
+            total_color = 'green'
+            total_icon = '💰'
+        elif total_profit < 0:
+            total_color = 'red'
+            total_icon = '💸'
+        else:
+            total_color = 'yellow'
+            total_icon = '💼'
+        
+        # حساب نسبة الربح
+        if trade_manager.starting_balance and balance:
+            profit_pct = ((balance - trade_manager.starting_balance) / trade_manager.starting_balance) * 100
+            profit_pct_str = f"{profit_pct:+.2f}%"
+        else:
+            profit_pct_str = "N/A"
+        
+        # طباعة حالة المحفظة
+        print(colored(f"\n{'='*60}", 'blue', attrs=['bold']))
+        print(colored("💰 PORTFOLIO STATUS", 'white', attrs=['bold']))
+        print(colored(f"   Balance: ${balance:,.2f} USDT", 'cyan'))
+        
+        if show_profit:
+            print(colored(f"   Daily PnL: {daily_icon} ${daily_profit:+,.2f}", daily_color))
+            print(colored(f"   Total PnL: {total_icon} ${total_profit:+,.2f}", total_color))
+            print(colored(f"   Profit %: {profit_pct_str}", 'magenta'))
+            print(colored(f"   Win Rate: {trade_manager.win_rate:.1f}%", 'yellow'))
+            print(colored(f"   Wins/Losses: {trade_manager.consecutive_wins}/{trade_manager.consecutive_losses}", 'cyan'))
+        
+        print(colored(f"{'='*60}\n", 'blue', attrs=['bold']))
+        
+    except Exception as e:
+        log_w(f"Portfolio status log error: {e}")
+
+def log_decision_intent(signal_side, decision_type, confidence_score, market_context):
+    """تسجيل نية القرار بوضوح"""
+    try:
+        if signal_side == "buy":
+            color = "green"
+            side_text = "BUY"
+            icon = "🟢"
+        elif signal_side == "sell":
+            color = "red"
+            side_text = "SELL"
+            icon = "🔴"
+        else:
+            color = "yellow"
+            side_text = "HOLD"
+            icon = "🟡"
+        
+        print(colored(f"\n{icon} {'='*50}", color, attrs=['bold']))
+        print(colored(f"{icon} DECISION INTENT", 'white', attrs=['bold']))
+        print(colored(f"{icon} Action: {side_text} ({decision_type})", color, attrs=['bold']))
+        print(colored(f"{icon} Confidence: {confidence_score:.2f}", 'cyan'))
+        print(colored(f"{icon} Market Context: {market_context}", 'yellow'))
+        print(colored(f"{icon} {'='*50}\n", color, attrs=['bold']))
+        
+    except Exception as e:
+        log_w(f"Decision intent log error: {e}")
+
+def log_block_reason(reason, details=""):
+    """تسجيل سبب الحجب بوضوح"""
+    print(colored(f"\n🛑 {'='*50}", 'red', attrs=['bold']))
+    print(colored(f"🛑 ENTRY BLOCKED", 'white', attrs=['bold']))
+    print(colored(f"🛑 Reason: {reason}", 'red', attrs=['bold']))
+    if details:
+        print(colored(f"🛑 Details: {details}", 'yellow'))
+    print(colored(f"🛑 {'='*50}\n", 'red', attrs=['bold']))
 
 def save_state(state: dict):
     try:
         state["ts"] = int(time.time())
         state["trade_stats"] = {
             "daily_profit": trade_manager.daily_profit,
+            "total_profit": trade_manager.total_profit,
             "consecutive_wins": trade_manager.consecutive_wins,
             "consecutive_losses": trade_manager.consecutive_losses,
-            "win_rate": trade_manager.win_rate
+            "win_rate": trade_manager.win_rate,
+            "starting_balance": trade_manager.starting_balance
         }
         with open(STATE_PATH, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
@@ -766,9 +860,11 @@ def load_state() -> dict:
         # استعادة إحصائيات التداول
         if "trade_stats" in state:
             trade_manager.daily_profit = state["trade_stats"].get("daily_profit", 0.0)
+            trade_manager.total_profit = state["trade_stats"].get("total_profit", 0.0)
             trade_manager.consecutive_wins = state["trade_stats"].get("consecutive_wins", 0)
             trade_manager.consecutive_losses = state["trade_stats"].get("consecutive_losses", 0)
             trade_manager.win_rate = state["trade_stats"].get("win_rate", 0.0)
+            trade_manager.starting_balance = state["trade_stats"].get("starting_balance", None)
             
         return state
     except Exception as e:
@@ -1863,34 +1959,43 @@ def execute_intelligent_trade_with_plan(side, price, plan):
         log_e(f"❌ Intelligent trade execution failed: {e}")
         return False
 
-def compute_adaptive_position_size(balance, price, confidence, market_phase):
+def compute_adaptive_position_size(balance, price, rr_expected, trend_class):
     """حساب حجم صفقة متكيف مع ظروف السوق"""
-    base_size = trade_manager.get_optimal_position_size(balance)
-    
-    # تعديل الحجم بناءً على الثقة
-    confidence_multiplier = 0.5 + (confidence * 0.5)  # 0.5 إلى 1.0
-    
-    # تعديل الحجم بناءً على مرحلة السوق
-    if market_phase in ["strong_bull", "strong_bear"]:
-        market_multiplier = 1.3
-    elif market_phase in ["bull", "bear"]:
-        market_multiplier = 1.1
-    else:
-        market_multiplier = 0.8
-    
-    adaptive_size = base_size * confidence_multiplier * market_multiplier
-    
-    # التأكد من أن الحجم ضمن الحدود المعقولة
-    max_position = balance * LEVERAGE * 0.8  # 80% من الرصيد بالرافعة
-    final_size = min(adaptive_size, max_position / price) if price > 0 else adaptive_size
-    
-    log_i(f"📊 ADAPTIVE POSITION SIZING:")
-    log_i(f"   Base: {base_size:.4f}")
-    log_i(f"   Confidence Multiplier: {confidence_multiplier:.2f}")
-    log_i(f"   Market Multiplier: {market_multiplier:.2f}")
-    log_i(f"   Final: {final_size:.4f}")
-    
-    return safe_qty(final_size)
+    try:
+        # حساب الحجم الأساسي بناءً على المخاطرة
+        base_size = trade_manager.get_optimal_position_size(balance)
+        
+        # تعديل الحجم بناءً على R/R المتوقع
+        rr_multiplier = min(2.0, max(0.5, rr_expected / 2.0))
+        
+        # تعديل الحجم بناءً على تصنيف الترند
+        if trend_class == "large":
+            trend_multiplier = 1.3
+        else:
+            trend_multiplier = 1.0
+        
+        adaptive_size = base_size * rr_multiplier * trend_multiplier
+        
+        # التحقق من الحد الأدنى للحجم
+        if LOT_MIN and adaptive_size * price < LOT_MIN:
+            log_block_reason("Invalid Position Size", f"Below minimum lot size ({LOT_MIN})")
+            return 0.0
+        
+        # التأكد من أن الحجم ضمن الحدود المعقولة
+        max_position = balance * LEVERAGE * 0.8  # 80% من الرصيد بالرافعة
+        final_size = min(adaptive_size, max_position / price) if price > 0 else adaptive_size
+        
+        log_i(f"📊 ADAPTIVE POSITION SIZING:")
+        log_i(f"   Base: {base_size:.4f}")
+        log_i(f"   R/R Multiplier: {rr_multiplier:.2f}")
+        log_i(f"   Trend Multiplier: {trend_multiplier:.2f}")
+        log_i(f"   Final: {final_size:.4f}")
+        
+        return safe_qty(final_size)
+        
+    except Exception as e:
+        log_w(f"Adaptive position size calculation error: {e}")
+        return 0.0
 
 def close_market_strict(reason="manual"):
     """إغلاق صارم للمركز"""
@@ -1910,6 +2015,14 @@ def close_market_strict(reason="manual"):
                 try:
                     ex.create_order(SYMBOL, "market", close_side, qty, None, params)
                     log_g(f"✅ Position closed: {qty:.4f} {SYMBOL}")
+                    
+                    # تسجيل الربح النهائي
+                    entry_price = STATE.get("entry", 0)
+                    current_price = price_now()
+                    if entry_price > 0 and current_price:
+                        profit = (current_price - entry_price) * qty if side == "long" else (entry_price - current_price) * qty
+                        trade_manager.total_profit += profit
+                    
                     break
                 except Exception as e:
                     if attempt == CLOSE_RETRY_ATTEMPTS - 1:
@@ -1935,6 +2048,9 @@ def close_market_strict(reason="manual"):
             "tp_fractions": [],
             "tp_hits": []
         })
+        
+        # عرض حالة المحفظة بعد الإغلاق
+        log_portfolio_status()
         
         return True
         
@@ -2174,6 +2290,10 @@ def manage_intelligent_position_with_plan(df, indicators, price_info):
         
         STATE["pnl"] = pnl_pct
         
+        # تحديث أعلى ربح تحقق
+        if pnl_pct > STATE.get("highest_profit_pct", 0):
+            STATE["highest_profit_pct"] = pnl_pct
+        
         # التحقق من FAIL-FAST
         if fail_fast_check(plan, current_price, df):
             log_i("🔴 FAIL-FAST: Closing trade early")
@@ -2307,8 +2427,18 @@ def ultra_intelligent_trading_loop():
     log_i(f"🎯 Leverage: {LEVERAGE}x")
     log_i(f"📊 Risk Allocation: {RISK_ALLOC*100}%")
     
+    # عرض حالة المحفظة الأولية
+    initial_balance = balance_usdt()
+    if initial_balance:
+        trade_manager.starting_balance = initial_balance
+        log_portfolio_status(initial_balance)
+    
+    cycle_count = 0
+    
     while True:
         try:
+            cycle_count += 1
+            
             # جمع البيانات الأساسية
             balance = balance_usdt()
             current_price = price_now()
@@ -2331,6 +2461,10 @@ def ultra_intelligent_trading_loop():
             STATE["last_council"] = council_data
             STATE["last_ind"] = council_data.get("indicators", {})
             STATE["last_spread_bps"] = orderbook_spread_bps()
+            
+            # عرض حالة المحفظة كل 5 دورات
+            if cycle_count % 5 == 0:
+                log_portfolio_status(balance)
             
             # عرض معلومات السوق
             if LOG_ADDONS:
@@ -2360,6 +2494,19 @@ def ultra_intelligent_trading_loop():
                 
                 # التحقق من صحة الخطة
                 if trade_plan and trade_plan.is_valid():
+                    # تسجيل نية الدخول بوضوح
+                    decision_type = "Counter-Trend" if (
+                        (trade_plan.side == "buy" and market_phase in ["bear", "strong_bear"]) or
+                        (trade_plan.side == "sell" and market_phase in ["bull", "strong_bull"])
+                    ) else "With-Trend"
+                    
+                    log_decision_intent(
+                        trade_plan.side,
+                        decision_type,
+                        council_data["confidence"],
+                        market_phase
+                    )
+                    
                     # تنفيذ الصفقة
                     signal_side = trade_plan.side
                     success = execute_intelligent_trade_with_plan(
@@ -2395,7 +2542,13 @@ def ultra_intelligent_trading_loop():
                         print_position_snapshot("INTELLIGENT_OPEN")
                 else:
                     if trade_plan:
-                        log_i(f"[ENTRY BLOCKED] Weak plan - R/R: {trade_plan.rr_expected:.1f}")
+                        # تسجيل سبب الحجب بوضوح
+                        if trade_plan.rr_expected < 1.5:
+                            log_block_reason("Low Risk/Reward Ratio", f"R/R: {trade_plan.rr_expected:.1f} < 1.5")
+                        elif not validate_entry_reasons(trade_plan.entry_reason):
+                            log_block_reason("Weak Entry Reasons", "Insufficient confirmation signals")
+                        else:
+                            log_i(f"[ENTRY BLOCKED] Weak plan - R/R: {trade_plan.rr_expected:.1f}")
                     else:
                         log_i("[ENTRY BLOCKED] No valid plan generated")
             
@@ -2437,18 +2590,81 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
+    balance = balance_usdt()
     return f"""
     <html>
-        <head><title>SUI ULTRA PRO AI BOT</title></head>
+        <head>
+            <title>SUI ULTRA PRO AI BOT</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }}
+                .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }}
+                h1 {{ color: #333; border-bottom: 2px solid #4CAF50; padding-bottom: 10px; }}
+                .status {{ display: flex; flex-wrap: wrap; gap: 20px; margin: 20px 0; }}
+                .card {{ background: #f9f9f9; border: 1px solid #ddd; border-radius: 5px; padding: 15px; flex: 1; min-width: 200px; }}
+                .card h3 {{ margin-top: 0; color: #4CAF50; }}
+                .profit-positive {{ color: green; font-weight: bold; }}
+                .profit-negative {{ color: red; font-weight: bold; }}
+                .profit-neutral {{ color: orange; font-weight: bold; }}
+                .nav {{ margin: 20px 0; }}
+                .nav a {{ margin-right: 15px; text-decoration: none; color: #4CAF50; font-weight: bold; }}
+                .nav a:hover {{ text-decoration: underline; }}
+            </style>
+        </head>
         <body>
-            <h1>🚀 SUI ULTRA PRO AI BOT - الإصدار الذكي المتقدم</h1>
-            <p><strong>Version:</strong> {BOT_VERSION}</p>
-            <p><strong>Exchange:</strong> {EXCHANGE_NAME.upper()}</p>
-            <p><strong>Symbol:</strong> {SYMBOL}</p>
-            <p><strong>Status:</strong> {'🟢 LIVE' if MODE_LIVE else '🟡 PAPER'}</p>
-            <p><strong>Daily PnL:</strong> {trade_manager.daily_profit:.2f} USDT</p>
-            <p><strong>Win Rate:</strong> {trade_manager.win_rate:.1f}%</p>
-            <p><a href="/health">Health Check</a> | <a href="/metrics">Metrics</a> | <a href="/performance">Performance</a></p>
+            <div class="container">
+                <h1>🚀 SUI ULTRA PRO AI BOT - الإصدار الذكي المتقدم</h1>
+                
+                <div class="status">
+                    <div class="card">
+                        <h3>🤖 Bot Info</h3>
+                        <p><strong>Version:</strong> {BOT_VERSION}</p>
+                        <p><strong>Exchange:</strong> {EXCHANGE_NAME.upper()}</p>
+                        <p><strong>Symbol:</strong> {SYMBOL}</p>
+                        <p><strong>Status:</strong> {'<span style="color:green">🟢 LIVE</span>' if MODE_LIVE else '<span style="color:orange">🟡 PAPER</span>'}</p>
+                    </div>
+                    
+                    <div class="card">
+                        <h3>💰 Portfolio</h3>
+                        <p><strong>Balance:</strong> ${balance:,.2f} USDT</p>
+                        <p><strong>Daily PnL:</strong> 
+                            <span class="{'profit-positive' if trade_manager.daily_profit > 0 else 'profit-negative' if trade_manager.daily_profit < 0 else 'profit-neutral'}">
+                                ${trade_manager.daily_profit:+,.2f}
+                            </span>
+                        </p>
+                        <p><strong>Total PnL:</strong> 
+                            <span class="{'profit-positive' if trade_manager.total_profit > 0 else 'profit-negative' if trade_manager.total_profit < 0 else 'profit-neutral'}">
+                                ${trade_manager.total_profit:+,.2f}
+                            </span>
+                        </p>
+                    </div>
+                    
+                    <div class="card">
+                        <h3>📊 Performance</h3>
+                        <p><strong>Win Rate:</strong> {trade_manager.win_rate:.1f}%</p>
+                        <p><strong>Wins/Losses:</strong> {trade_manager.consecutive_wins}/{trade_manager.consecutive_losses}</p>
+                        <p><strong>Total Trades:</strong> {len(trade_manager.trade_history)}</p>
+                    </div>
+                    
+                    <div class="card">
+                        <h3>⚙️ Position</h3>
+                        <p><strong>Open:</strong> {'<span style="color:green">🟢 YES</span>' if STATE["open"] else '<span style="color:red">🔴 NO</span>'}</p>
+                        <p><strong>Side:</strong> {STATE["side"] or 'N/A'}</p>
+                        <p><strong>Current PnL:</strong> 
+                            <span class="{'profit-positive' if STATE.get('pnl', 0) > 0 else 'profit-negative' if STATE.get('pnl', 0) < 0 else 'profit-neutral'}">
+                                {STATE.get('pnl', 0):+.2f}%
+                            </span>
+                        </p>
+                    </div>
+                </div>
+                
+                <div class="nav">
+                    <a href="/health">Health Check</a>
+                    <a href="/metrics">Metrics</a>
+                    <a href="/performance">Performance</a>
+                    <a href="/mark/green">Mark Green</a>
+                    <a href="/mark/red">Mark Red</a>
+                </div>
+            </div>
         </body>
     </html>
     """
@@ -2462,7 +2678,9 @@ def health():
         "symbol": SYMBOL,
         "position_open": STATE["open"],
         "daily_profit": trade_manager.daily_profit,
-        "win_rate": trade_manager.win_rate
+        "total_profit": trade_manager.total_profit,
+        "win_rate": trade_manager.win_rate,
+        "balance": balance_usdt()
     })
 
 @app.route("/metrics")
@@ -2473,6 +2691,7 @@ def metrics():
         "symbol": SYMBOL,
         "balance": balance_usdt(),
         "daily_profit": trade_manager.daily_profit,
+        "total_profit": trade_manager.total_profit,
         "win_rate": trade_manager.win_rate,
         "consecutive_wins": trade_manager.consecutive_wins,
         "consecutive_losses": trade_manager.consecutive_losses,
@@ -2486,13 +2705,19 @@ def performance():
     recent_trades = trade_manager.trade_history[-10:]  # آخر 10 صفقات
     return jsonify({
         "daily_profit": trade_manager.daily_profit,
+        "total_profit": trade_manager.total_profit,
         "win_rate": trade_manager.win_rate,
         "avg_win": trade_manager.avg_win,
         "avg_loss": trade_manager.avg_loss,
+        "starting_balance": trade_manager.starting_balance,
+        "current_balance": balance_usdt(),
+        "profit_percentage": ((balance_usdt() - (trade_manager.starting_balance or balance_usdt())) / (trade_manager.starting_balance or balance_usdt())) * 100 if trade_manager.starting_balance else 0,
         "recent_trades": [
             {
-                "time": t['timestamp'].strftime('%H:%M:%S'),
+                "time": t['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
                 "side": t['side'],
+                "entry": t['entry'],
+                "exit": t['exit'],
                 "profit": t['profit'],
                 "profit_pct": t['profit_pct']
             } for t in recent_trades
@@ -2523,8 +2748,8 @@ def startup_sequence():
         balance = balance_usdt()
         price = price_now()
         log_g(f"✅ Exchange connection successful")
-        log_g(f"💰 Balance: {balance:.2f} USDT")
-        log_g(f"💰 Current price: {price:.6f}")
+        log_g(f"💰 Balance: ${balance:,.2f} USDT")
+        log_g(f"💰 Current price: ${price:,.6f}")
     except Exception as e:
         log_e(f"❌ Exchange connection failed: {e}")
         return False
@@ -2532,7 +2757,8 @@ def startup_sequence():
     # عرض إحصائيات البوت
     log_i(f"📊 Performance Metrics:")
     log_i(f"   Win Rate: {trade_manager.win_rate:.1f}%")
-    log_i(f"   Daily PnL: {trade_manager.daily_profit:.2f} USDT")
+    log_i(f"   Daily PnL: ${trade_manager.daily_profit:+,.2f}")
+    log_i(f"   Total PnL: ${trade_manager.total_profit:+,.2f}")
     log_i(f"   Consecutive Wins: {trade_manager.consecutive_wins}")
     log_i(f"   Consecutive Losses: {trade_manager.consecutive_losses}")
     
