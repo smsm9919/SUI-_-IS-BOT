@@ -6,8 +6,8 @@ SUI ULTRA PRO AI BOT - الإصدار المحسن مع نظام SMC المتك�
 • كشف فخاخ التلاعب السوقي
 • مؤشرات انفجار/انهيار سعري
 • أنماط دخول متعددة (7 أنماط مختلفة)
-• نظام حماية متكامل مع تأمين الصفقات
-• محلل شموع متقدم مع أنماط SMC
+• نظام حماية متكامل مع تأكيد دخول محسن
+• مدير رصيد محفظة وربح تراكمي مع أيقونات ملونة
 """
 
 import os, time, math, random, signal, sys, traceback, logging, json
@@ -24,7 +24,18 @@ from dataclasses import dataclass
 from typing import Optional, List, Dict, Tuple, Any, Set
 from enum import Enum
 import warnings
+import threading
 warnings.filterwarnings('ignore')
+
+# ============================================
+#  CONFIGURATION - الإعدادات
+# ============================================
+
+PORT = int(os.environ.get("PORT", 5000))
+INITIAL_BALANCE = float(os.environ.get("INITIAL_BALANCE", "1000.0"))
+RISK_PERCENT = float(os.environ.get("RISK_PERCENT", "0.6"))
+SYMBOL = os.environ.get("SYMBOL", "SUI/USDT:USDT")
+INTERVAL = os.environ.get("INTERVAL", "15m")
 
 # ============================================
 #  ENHANCED CONSOLE LOGGER - اللوجر المحسن
@@ -145,6 +156,71 @@ class EnhancedProConsoleLogger:
         now = datetime.now()
         return f"{now.hour:02d}:{now.minute:02d}:{now.second:02d}.{now.microsecond // 1000:03d}"
     
+    def log_system(self, message: str, level: str = "INFO"):
+        """تسجيل رسالة نظام"""
+        level_color = {
+            "INFO": AdvancedConsoleColors.FG.CYAN,
+            "WARNING": AdvancedConsoleColors.FG.YELLOW,
+            "ERROR": AdvancedConsoleColors.FG.RED,
+            "SUCCESS": AdvancedConsoleColors.FG.GREEN
+        }.get(level, AdvancedConsoleColors.FG.CYAN)
+        
+        level_icon = {
+            "INFO": "ℹ️",
+            "WARNING": "⚠️",
+            "ERROR": "❌",
+            "SUCCESS": "✅"
+        }.get(level, "ℹ️")
+        
+        formatted_message = f"{level_color}{level_icon} {message}{AdvancedConsoleColors.RESET}"
+        
+        if self.show_timestamp:
+            timestamp = f"{AdvancedConsoleColors.FG.LIGHT_BLACK}[{self._format_timestamp()}]{AdvancedConsoleColors.RESET}"
+            print(f"{timestamp} {formatted_message}")
+        else:
+            print(formatted_message)
+        
+        # تسجيل في الملف
+        getattr(self.file_logger, level.lower(), self.file_logger.info)(message)
+    
+    def log_error(self, message: str, error: Exception, context: str = ""):
+        """تسجيل خطأ"""
+        error_msg = f"ERROR in {context}: {message} - {str(error)}"
+        self.log_system(error_msg, "ERROR")
+        self.file_logger.error(error_msg, exc_info=True)
+    
+    def log_balance(self, balance: float, pnl: float, initial_balance: float):
+        """تسجيل رصيد المحفظة والربح التراكمي"""
+        balance_color = AdvancedConsoleColors.FG.LIGHT_BLUE
+        pnl_color = AdvancedConsoleColors.FG.GREEN if pnl >= 0 else AdvancedConsoleColors.FG.RED
+        pnl_icon = "📈" if pnl >= 0 else "📉"
+        pnl_percent = (pnl / initial_balance) * 100
+        
+        balance_line = f"{AdvancedConsoleColors.BOLD}💰 BALANCE:{AdvancedConsoleColors.RESET} {balance_color}{balance:,.2f} USDT{AdvancedConsoleColors.RESET}"
+        pnl_line = f"{pnl_icon} {AdvancedConsoleColors.BOLD}CUMULATIVE P&L:{AdvancedConsoleColors.RESET} {pnl_color}{pnl:+,.2f} USDT ({pnl_percent:+.2f}%){AdvancedConsoleColors.RESET}"
+        
+        # خط فاصل
+        separator = f"{AdvancedConsoleColors.FG.LIGHT_BLACK}{'─' * 60}{AdvancedConsoleColors.RESET}"
+        
+        print(f"\n{separator}")
+        print(f"{balance_line} | {pnl_line}")
+        print(separator)
+    
+    def log_portfolio_summary(self, total_trades: int, win_rate: float, total_pnl: float, active_trade: bool):
+        """تسجيل ملخص المحفظة"""
+        win_rate_color = AdvancedConsoleColors.FG.GREEN if win_rate >= 60 else AdvancedConsoleColors.FG.YELLOW if win_rate >= 50 else AdvancedConsoleColors.FG.RED
+        pnl_color = AdvancedConsoleColors.FG.GREEN if total_pnl >= 0 else AdvancedConsoleColors.FG.RED
+        
+        summary = (
+            f"{AdvancedConsoleColors.BOLD}📊 PORTFOLIO SUMMARY:{AdvancedConsoleColors.RESET}\n"
+            f"  • {AdvancedConsoleColors.FG.CYAN}Trades:{AdvancedConsoleColors.RESET} {total_trades}\n"
+            f"  • {AdvancedConsoleColors.FG.MAGENTA}Win Rate:{AdvancedConsoleColors.RESET} {win_rate_color}{win_rate:.1f}%{AdvancedConsoleColors.RESET}\n"
+            f"  • {AdvancedConsoleColors.FG.YELLOW}Total P&L:{AdvancedConsoleColors.RESET} {pnl_color}{total_pnl:+,.2f}%{AdvancedConsoleColors.RESET}\n"
+            f"  • {AdvancedConsoleColors.FG.LIGHT_BLUE}Active Trade:{AdvancedConsoleColors.RESET} {'✅ Yes' if active_trade else '❌ No'}"
+        )
+        
+        print(f"\n{summary}")
+    
     def log_smc_pattern(self, pattern: SmartMoneyPatterns, details: Dict, confidence: float = 0.0):
         """تسجيل نمط SMC"""
         icon = self.SMC_ICONS.get(pattern, "❓")
@@ -262,6 +338,253 @@ class EnhancedProConsoleLogger:
 
 # إنشاء كائن اللوجر المحسن
 logger = EnhancedProConsoleLogger(show_timestamp=True)
+
+# ============================================
+#  ENHANCED ENTRY VALIDATOR - مدقق الدخول المحسن
+# ============================================
+
+class EnhancedEntryValidator:
+    """مدقق دخول محسن مع بوابات تأكيد متعددة"""
+    
+    def __init__(self):
+        self.confirmation_rules = {
+            'mandatory_gates': [
+                'price_structure_alignment',
+                'volume_confirmation',
+                'market_context_filter',
+                'risk_reward_check',
+                'pattern_confirmation'
+            ],
+            'optional_gates': [
+                'momentum_confirmation',
+                'time_of_day_filter',
+                'volatility_check'
+            ]
+        }
+    
+    def validate_entry(self, scenario: Dict, candles: List[Dict], 
+                      smc_analysis: Dict) -> Tuple[bool, str]:
+        """
+        التحقق من صحة سيناريو الدخول مع جميع البوابات
+        
+        Returns:
+            (is_valid, reason)
+        """
+        # 1. بوابة الهيكل السعري
+        if not self._check_price_structure(scenario, candles):
+            return False, "Price structure not aligned"
+        
+        # 2. بوابة تأكيد الحجم
+        if not self._check_volume_confirmation(scenario, candles):
+            return False, "Volume not confirming"
+        
+        # 3. بوابة سياق السوق
+        if not self._check_market_context(scenario, smc_analysis):
+            return False, "Market context unfavorable"
+        
+        # 4. بوابة نسبة المخاطرة/العائد
+        if not self._check_risk_reward(scenario):
+            return False, "Risk/Reward ratio too low"
+        
+        # 5. بوابة تأكيد النمط
+        if not self._check_pattern_confirmation(scenario, candles):
+            return False, "Pattern not confirmed"
+        
+        return True, "All gates passed"
+    
+    def _check_price_structure(self, scenario: Dict, candles: List[Dict]) -> bool:
+        """التحقق من محاذاة الهيكل السعري"""
+        current_price = candles[-1]['close']
+        entry_type = scenario['entry_type']
+        
+        # لمنع الدخول في مناطق معاكسة
+        if entry_type == 'BUY':
+            # تأكيد أن السعر فوق مستويات دعم مهمة
+            recent_lows = [c['low'] for c in candles[-5:]]
+            support_level = min(recent_lows)
+            
+            # الحصول على آخر 3 شمعات قبل الحالية
+            last_3_candles = candles[-4:-1] if len(candles) >= 4 else candles[:-1]
+            
+            # شرط: الشمعة الحالية تغلق فوق قمة الشمعة السابقة
+            if len(candles) >= 2:
+                if current_price <= candles[-2]['high']:
+                    return False
+            
+            # شرط: وجود شمعة إزاحة (Displacement) قبل الدخول
+            displacement_found = False
+            for i in range(2, min(6, len(candles))):
+                idx = -i
+                candle = candles[idx]
+                prev_candle = candles[idx-1] if idx-1 >= 0 else None
+                
+                if prev_candle:
+                    # شمعة إزاحة صعودية: شمعة خضراء كبيرة
+                    if (candle['close'] > candle['open'] * 1.005 and
+                        (candle['close'] - candle['open']) > (candle['high'] - candle['low']) * 0.7):
+                        displacement_found = True
+                        break
+            
+            return current_price > support_level and displacement_found
+        
+        else:  # SELL
+            # تأكيد أن السعر تحت مستويات مقاومة مهمة
+            recent_highs = [c['high'] for c in candles[-5:]]
+            resistance_level = max(recent_highs)
+            
+            # شرط: الشمعة الحالية تغلق تحت قاع الشمعة السابقة
+            if len(candles) >= 2:
+                if current_price >= candles[-2]['low']:
+                    return False
+            
+            # شرط: وجود شمعة إزاحة هابطة
+            displacement_found = False
+            for i in range(2, min(6, len(candles))):
+                idx = -i
+                candle = candles[idx]
+                prev_candle = candles[idx-1] if idx-1 >= 0 else None
+                
+                if prev_candle:
+                    # شمعة إزاحة هابطة: شمعة حمراء كبيرة
+                    if (candle['close'] < candle['open'] * 0.995 and
+                        (candle['open'] - candle['close']) > (candle['high'] - candle['low']) * 0.7):
+                        displacement_found = True
+                        break
+            
+            return current_price < resistance_level and displacement_found
+    
+    def _check_volume_confirmation(self, scenario: Dict, candles: List[Dict]) -> bool:
+        """تأكيد الحجم"""
+        if len(candles) < 10:
+            return False
+        
+        current_volume = candles[-1]['volume']
+        avg_volume = np.mean([c['volume'] for c in candles[-10:-1]])
+        
+        entry_type = scenario['entry_type']
+        
+        # حجم الشمعة الحالية يجب أن يكون أعلى من المتوسط
+        if current_volume < avg_volume * 0.8:
+            return False
+        
+        # تحليل نمط الحجم
+        volume_pattern = self._analyze_volume_pattern(candles[-5:])
+        
+        if entry_type == 'BUY':
+            # في الشراء: نفضل حجم متزايد في الشمعات الصعودية
+            return volume_pattern in ['INCREASING', 'SPIKE']
+        else:
+            # في البيع: نفضل حجم متزايد في الشمعات الهابطة
+            return volume_pattern in ['INCREASING', 'SPIKE']
+    
+    def _analyze_volume_pattern(self, candles: List[Dict]) -> str:
+        """تحليل نمط الحجم"""
+        if len(candles) < 3:
+            return "UNKNOWN"
+        
+        volumes = [c['volume'] for c in candles]
+        
+        if volumes[-1] > max(volumes[:-1]) * 1.5:
+            return "SPIKE"
+        elif volumes[-1] < min(volumes[:-1]) * 0.7:
+            return "DRYUP"
+        elif all(v > volumes[i-1] for i, v in enumerate(volumes[1:], 1)):
+            return "INCREASING"
+        elif all(v < volumes[i-1] for i, v in enumerate(volumes[1:], 1)):
+            return "DECREASING"
+        else:
+            return "CONGESTION"
+    
+    def _check_market_context(self, scenario: Dict, smc_analysis: Dict) -> bool:
+        """فحص سياق السوق"""
+        trend_structure = smc_analysis.get('trend_structure', {})
+        market_cycle = smc_analysis.get('market_cycle', {})
+        entry_type = scenario['entry_type']
+        
+        trend = trend_structure.get('trend', 'SIDEWAYS')
+        cycle = market_cycle.get('cycle', 'UNKNOWN')
+        phase = market_cycle.get('phase', 'UNKNOWN')
+        
+        # 1. تحقق من الاتجاه
+        if entry_type == 'BUY' and trend == 'BEARISH':
+            # في اتجاه هابط، نشتري فقط في مراكز معينة
+            if phase not in ['ACCUMULATION', 'OVERSOLD']:
+                return False
+        
+        elif entry_type == 'SELL' and trend == 'BULLISH':
+            # في اتجاه صاعد، نبيع فقط في مراكز معينة
+            if phase not in ['DISTRIBUTION', 'OVERBOUGHT']:
+                return False
+        
+        # 2. تحقق من مرحلة الدورة
+        if cycle == 'OVERBOUGHT' and entry_type == 'BUY':
+            return False
+        
+        if cycle == 'OVERSOLD' and entry_type == 'SELL':
+            return False
+        
+        return True
+    
+    def _check_risk_reward(self, scenario: Dict) -> bool:
+        """فحص نسبة المخاطرة/العائد"""
+        min_rr = 1.5  # أقل نسبة مقبولة 1:1.5
+        
+        if scenario['risk_reward'] < min_rr:
+            return False
+        
+        # نسبة المخاطرة لا تزيد عن 2%
+        risk_pct = abs(scenario['entry_price'] - scenario['stop_loss']) / scenario['entry_price']
+        if risk_pct > 0.02:
+            return False
+        
+        return True
+    
+    def _check_pattern_confirmation(self, scenario: Dict, candles: List[Dict]) -> bool:
+        """تأكيد النمط السعري"""
+        entry_type = scenario['entry_type']
+        scenario_type = scenario['type']
+        
+        # شروط تأكيد عامة لكل الأنماط
+        current_candle = candles[-1]
+        prev_candle = candles[-2] if len(candles) >= 2 else None
+        
+        if not prev_candle:
+            return False
+        
+        if entry_type == 'BUY':
+            # تأكيد شراء: شمعة خضراء تغلق فوق فتحها
+            if current_candle['close'] <= current_candle['open']:
+                return False
+            
+            # تأكيد إضافي: الإغلاق فوق منتصف مدى الشمعة
+            candle_mid = (current_candle['high'] + current_candle['low']) / 2
+            if current_candle['close'] < candle_mid:
+                return False
+            
+            # نموذج Engulfing صعودي (اختياري)
+            if (current_candle['close'] > prev_candle['open'] and
+                current_candle['open'] < prev_candle['close'] and
+                prev_candle['close'] < prev_candle['open']):
+                return True
+            
+        else:  # SELL
+            # تأكيد بيع: شمعة حمراء تغلق تحت فتحها
+            if current_candle['close'] >= current_candle['open']:
+                return False
+            
+            # تأكيد إضافي: الإغلاق تحت منتصف مدى الشمعة
+            candle_mid = (current_candle['high'] + current_candle['low']) / 2
+            if current_candle['close'] > candle_mid:
+                return False
+            
+            # نموذج Engulfing هابط (اختياري)
+            if (current_candle['close'] < prev_candle['open'] and
+                current_candle['open'] > prev_candle['close'] and
+                prev_candle['close'] > prev_candle['open']):
+                return True
+        
+        # إذا لم يكن هناك نمط engulfing، نكتفي بالشمعة المؤكدة
+        return True
 
 # ============================================
 #  ADVANCED SMC ANALYZER - محلل SMC المتقدم
@@ -1152,86 +1475,113 @@ class AdvancedSMCAnalyzer:
 # ============================================
 
 class EntryScenario:
-    """سيناريوهات الدخول المتعددة"""
+    """سيناريوهات الدخول المتعددة مع بوابة تأكيد"""
     
     def __init__(self, smc_analyzer: AdvancedSMCAnalyzer, logger: EnhancedProConsoleLogger):
         self.smc_analyzer = smc_analyzer
         self.logger = logger
+        self.entry_validator = EnhancedEntryValidator()  # ✨ المدقق الجديد
+        
+        # أوزان معدلة
         self.scenario_weights = {
-            'bos_breakout': 0.25,
-            'choch_reversal': 0.20,
+            'bos_breakout': 0.30,
+            'choch_reversal': 0.25,
             'ob_retest': 0.18,
-            'fvg_fill': 0.15,
-            'liquidity_sweep': 0.12,
-            'correction_entry': 0.10
+            'fvg_fill': 0.12,
+            'liquidity_sweep': 0.10,
+            'correction_entry': 0.05
         }
     
     def analyze_entry_scenarios(self, candles: List[Dict], smc_analysis: Dict) -> List[Dict]:
         """
-        تحليل جميع سيناريوهات الدخول الممكنة
-        
-        Returns:
-            List[Dict]: قائمة السيناريوهات المصنفة حسب القوة
+        تحليل جميع سيناريوهات الدخول الممكنة مع التصفية
         """
         scenarios = []
         
-        # السيناريو 1: دخول من كسر هيكل (BOS Breakout)
-        bos_scenarios = self._analyze_bos_entries(candles, smc_analysis)
-        scenarios.extend(bos_scenarios)
+        # جمع جميع السيناريوهات
+        all_scenarios = []
+        all_scenarios.extend(self._analyze_bos_entries(candles, smc_analysis))
+        all_scenarios.extend(self._analyze_choch_entries(candles, smc_analysis))
+        all_scenarios.extend(self._analyze_ob_entries(candles, smc_analysis))
+        all_scenarios.extend(self._analyze_fvg_entries(candles, smc_analysis))
+        all_scenarios.extend(self._analyze_liquidity_entries(candles, smc_analysis))
+        all_scenarios.extend(self._analyze_correction_entries(candles, smc_analysis))
         
-        # السيناريو 2: دخول من انعكاس هيكل (CHoCH Reversal)
-        choch_scenarios = self._analyze_choch_entries(candles, smc_analysis)
-        scenarios.extend(choch_scenarios)
-        
-        # السيناريو 3: دخول من إعادة اختبار Order Block
-        ob_scenarios = self._analyze_ob_entries(candles, smc_analysis)
-        scenarios.extend(ob_scenarios)
-        
-        # السيناريو 4: دخول من ملء FVG
-        fvg_scenarios = self._analyze_fvg_entries(candles, smc_analysis)
-        scenarios.extend(fvg_scenarios)
-        
-        # السيناريو 5: دخول بعد سحب سيولة
-        liquidity_scenarios = self._analyze_liquidity_entries(candles, smc_analysis)
-        scenarios.extend(liquidity_scenarios)
-        
-        # السيناريو 6: دخول من مناطق التصحيح
-        correction_scenarios = self._analyze_correction_entries(candles, smc_analysis)
-        scenarios.extend(correction_scenarios)
+        # تصفية السيناريوهات باستخدام المدقق
+        for scenario in all_scenarios:
+            is_valid, reason = self.entry_validator.validate_entry(scenario, candles, smc_analysis)
+            
+            if is_valid:
+                # زيادة درجة الثقة للسيناريوهات المؤكدة
+                scenario['confidence'] *= 1.2
+                scenario['validated'] = True
+                scenario['validation_reason'] = reason
+                scenarios.append(scenario)
+            else:
+                # تسجيل السيناريوهات المرفوضة للتحليل
+                scenario['validated'] = False
+                scenario['validation_reason'] = reason
+                scenario['total_score'] *= 0.3  # تخفيض شديد للدرجة
         
         # تصنيف السيناريوهات حسب القوة
-        ranked_scenarios = sorted(scenarios, key=lambda x: x['total_score'], reverse=True)
+        ranked_scenarios = sorted(
+            [s for s in scenarios if s['validated']], 
+            key=lambda x: x['total_score'], 
+            reverse=True
+        )
         
         # تسجيل أفضل 3 سيناريوهات
         for i, scenario in enumerate(ranked_scenarios[:3]):
             self._log_scenario(scenario, i+1)
         
-        return ranked_scenarios[:10]  # أفضل 10 سيناريوهات
+        return ranked_scenarios[:5]  # أفضل 5 سيناريوهات مؤكدة
     
     def _analyze_bos_entries(self, candles: List[Dict], smc_analysis: Dict) -> List[Dict]:
-        """تحليل دخولات كسر الهيكل"""
+        """تحليل دخولات كسر الهيكل - معدل"""
         scenarios = []
         current_price = candles[-1]['close']
-        current_low = candles[-1]['low']
-        current_high = candles[-1]['high']
         
         for bos in smc_analysis.get('bos_signals', []):
-            # فقط الإشارات القريبة (آخر 10 شمعات)
-            if len(candles) - bos['index'] > 10:
+            # 🔴 شرط: الإشارة حديثة (آخر 5 شمعات)
+            if len(candles) - bos['index'] > 5:
+                continue
+            
+            # 🔴 تعديل: ننتظر إعادة اختبار (Retest) قبل الدخول
+            needs_retest = True
+            
+            # البحث عن إعادة اختبار في الشمعات اللاحقة
+            for i in range(bos['index'] + 1, min(bos['index'] + 5, len(candles))):
+                test_candle = candles[i]
+                
+                if bos['type'] == 'BOS_BULLISH':
+                    # في BOS صعودي: نبحث عن اختبار للمقاومة المحولة لدعم
+                    if test_candle['low'] <= bos['price'] and test_candle['close'] > bos['price']:
+                        needs_retest = False
+                        current_price = test_candle['close']  # ندخل عند تأكيد الإغلاق فوق
+                        break
+                
+                elif bos['type'] == 'BOS_BEARISH':
+                    # في BOS هابط: نبحث عن اختبار للدعم المحول لمقاومة
+                    if test_candle['high'] >= bos['price'] and test_candle['close'] < bos['price']:
+                        needs_retest = False
+                        current_price = test_candle['close']  # ندخل عند تأكيد الإغلاق تحت
+                        break
+            
+            # إذا لم يكن هناك إعادة اختبار واضحة، نتخطى
+            if needs_retest:
                 continue
             
             entry_type = None
-            entry_price = 0
+            entry_price = current_price
             stop_loss = 0
             take_profit = 0
-            confidence = bos.get('strength', 0)
+            confidence = bos.get('strength', 0) * 1.1  # زيادة الثقة بسبب Retest
             
             if bos['type'] == 'BOS_BULLISH' and bos.get('volume_confirmation', False):
-                # دخول شراء من BOS صعودي
+                # دخول شراء من BOS صعودي بعد إعادة اختبار
                 entry_type = 'BUY'
-                entry_price = current_price
-                stop_loss = current_low * 0.995
-                take_profit = entry_price * 1.015  # هدف 1.5%
+                stop_loss = current_price * 0.99  # 1% stop loss
+                take_profit = entry_price * 1.02  # هدف 2%
                 
                 scenario = {
                     'type': 'BOS_BULLISH_BREAKOUT',
@@ -1243,16 +1593,16 @@ class EntryScenario:
                     'risk_reward': (take_profit - entry_price) / (entry_price - stop_loss),
                     'volume_signal': 'CONFIRMED' if bos['volume_confirmation'] else 'WEAK',
                     'momentum': bos.get('momentum', 0),
+                    'retest_confirmed': True,
                     'total_score': confidence * self.scenario_weights['bos_breakout'] * (1 + bos.get('momentum', 0) * 10)
                 }
                 scenarios.append(scenario)
             
             elif bos['type'] == 'BOS_BEARISH' and bos.get('volume_confirmation', False):
-                # دخول بيع من BOS هابط
+                # دخول بيع من BOS هابط بعد إعادة اختبار
                 entry_type = 'SELL'
-                entry_price = current_price
-                stop_loss = current_high * 1.005
-                take_profit = entry_price * 0.985  # هدف 1.5%
+                stop_loss = current_price * 1.01  # 1% stop loss
+                take_profit = entry_price * 0.98  # هدف 2%
                 
                 scenario = {
                     'type': 'BOS_BEARISH_BREAKOUT',
@@ -1264,6 +1614,7 @@ class EntryScenario:
                     'risk_reward': (entry_price - take_profit) / (stop_loss - entry_price),
                     'volume_signal': 'CONFIRMED' if bos['volume_confirmation'] else 'WEAK',
                     'momentum': bos.get('momentum', 0),
+                    'retest_confirmed': True,
                     'total_score': confidence * self.scenario_weights['bos_breakout'] * (1 + abs(bos.get('momentum', 0)) * 10)
                 }
                 scenarios.append(scenario)
@@ -1276,12 +1627,12 @@ class EntryScenario:
         current_price = candles[-1]['close']
         
         for choch in smc_analysis.get('choch_signals', []):
-            # فقط الإشارات القريبة جداً (آخر 5 شمعات)
-            if len(candles) - choch['index'] > 5:
+            # 🔴 فقط الإشارات القريبة جداً (آخر 3 شمعات)
+            if len(candles) - choch['index'] > 3:
                 continue
             
             entry_type = None
-            entry_price = 0
+            entry_price = current_price
             stop_loss = 0
             take_profit = 0
             
@@ -1291,9 +1642,8 @@ class EntryScenario:
             if choch['type'] == 'CHOCH_BULLISH' and choch.get('structure_break', False):
                 # دخول شراء من CHoCH صعودي
                 entry_type = 'BUY'
-                entry_price = current_price
-                stop_loss = candles[-1]['low'] * 0.995
-                take_profit = entry_price * 1.02  # هدف 2%
+                stop_loss = candles[-1]['low'] * 0.99
+                take_profit = entry_price * 1.025  # هدف 2.5%
                 
                 scenario = {
                     'type': 'CHOCH_BULLISH_REVERSAL',
@@ -1312,9 +1662,8 @@ class EntryScenario:
             elif choch['type'] == 'CHOCH_BEARISH' and choch.get('structure_break', False):
                 # دخول بيع من CHoCH هابط
                 entry_type = 'SELL'
-                entry_price = current_price
-                stop_loss = candles[-1]['high'] * 1.005
-                take_profit = entry_price * 0.98  # هدف 2%
+                stop_loss = candles[-1]['high'] * 1.01
+                take_profit = entry_price * 0.975  # هدف 2.5%
                 
                 scenario = {
                     'type': 'CHOCH_BEARISH_REVERSAL',
@@ -1341,24 +1690,35 @@ class EntryScenario:
             ob_range = ob.get('price_range', (0, 0))
             ob_mid = ob.get('mid_price', 0)
             
-            # فقط الـ Order Blocks القريبة (ضمن 1%)
-            if abs(current_price - ob_mid) / current_price > 0.01:
+            # 🔴 فقط الـ Order Blocks القريبة (ضمن 0.5%)
+            if abs(current_price - ob_mid) / current_price > 0.005:
                 continue
             
             entry_type = None
-            entry_price = 0
+            entry_price = current_price
             stop_loss = 0
             take_profit = 0
             
-            # تحديد إذا كان السعر يختبر الـ OB
-            is_testing = ob_range[0] <= current_price <= ob_range[1]
+            # 🔴 تحديد إذا كان السعر يختبر الـ OB مع تأكيد
+            is_testing = ob_range[0] * 0.999 <= current_price <= ob_range[1] * 1.001
+            
+            # 🔴 تأكيد إضافي: شمعة رد فعل
+            if len(candles) >= 2:
+                current_candle = candles[-1]
+                if ob['type'] == 'BULLISH_OB':
+                    # في Bullish OB: ننتظر شمعة خضراء بعد الاختبار
+                    if not (current_candle['close'] > current_candle['open']):
+                        continue
+                else:  # BEARISH_OB
+                    # في Bearish OB: ننتظر شمعة حمراء بعد الاختبار
+                    if not (current_candle['close'] < current_candle['open']):
+                        continue
             
             if ob['type'] == 'BULLISH_OB' and is_testing:
                 # دخول شراء من Bullish OB
                 entry_type = 'BUY'
-                entry_price = current_price
                 stop_loss = ob_range[0] * 0.995
-                take_profit = ob_mid * 1.01  # هدف 1% فوق منتصف الـ OB
+                take_profit = ob_mid * 1.015  # هدف 1.5% فوق منتصف الـ OB
                 
                 scenario = {
                     'type': 'BULLISH_OB_RETEST',
@@ -1366,10 +1726,11 @@ class EntryScenario:
                     'entry_price': entry_price,
                     'stop_loss': stop_loss,
                     'take_profit': take_profit,
-                    'confidence': ob.get('strength', 0),
+                    'confidence': ob.get('strength', 0) * 1.1,
                     'risk_reward': (take_profit - entry_price) / (entry_price - stop_loss),
                     'ob_strength': ob.get('strength', 0),
                     'test_count': ob.get('test_count', 0),
+                    'reaction_candle': True,
                     'total_score': ob.get('strength', 0) * self.scenario_weights['ob_retest']
                 }
                 scenarios.append(scenario)
@@ -1377,9 +1738,8 @@ class EntryScenario:
             elif ob['type'] == 'BEARISH_OB' and is_testing:
                 # دخول بيع من Bearish OB
                 entry_type = 'SELL'
-                entry_price = current_price
                 stop_loss = ob_range[1] * 1.005
-                take_profit = ob_mid * 0.99  # هدف 1% تحت منتصف الـ OB
+                take_profit = ob_mid * 0.985  # هدف 1.5% تحت منتصف الـ OB
                 
                 scenario = {
                     'type': 'BEARISH_OB_RETEST',
@@ -1387,10 +1747,11 @@ class EntryScenario:
                     'entry_price': entry_price,
                     'stop_loss': stop_loss,
                     'take_profit': take_profit,
-                    'confidence': ob.get('strength', 0),
+                    'confidence': ob.get('strength', 0) * 1.1,
                     'risk_reward': (entry_price - take_profit) / (stop_loss - entry_price),
                     'ob_strength': ob.get('strength', 0),
                     'test_count': ob.get('test_count', 0),
+                    'reaction_candle': True,
                     'total_score': ob.get('strength', 0) * self.scenario_weights['ob_retest']
                 }
                 scenarios.append(scenario)
@@ -1415,11 +1776,21 @@ class EntryScenario:
                 stop_loss = 0
                 take_profit = 0
                 
+                # 🔴 تأكيد: شمعة رد فعل
+                if len(candles) >= 2:
+                    current_candle = candles[-1]
+                    if fvg['type'] == 'BULLISH_FVG':
+                        if not (current_candle['close'] > current_candle['open']):
+                            continue
+                    else:  # BEARISH_FVG
+                        if not (current_candle['close'] < current_candle['open']):
+                            continue
+                
                 if fvg['type'] == 'BULLISH_FVG':
                     # دخول شراء من Bullish FVG
                     entry_type = 'BUY'
                     stop_loss = fvg_range[0] * 0.995
-                    take_profit = fvg_range[1] * 1.005
+                    take_profit = fvg_range[1] * 1.01
                     
                     scenario = {
                         'type': 'BULLISH_FVG_FILL',
@@ -1427,9 +1798,10 @@ class EntryScenario:
                         'entry_price': entry_price,
                         'stop_loss': stop_loss,
                         'take_profit': take_profit,
-                        'confidence': fvg.get('strength', 0),
+                        'confidence': fvg.get('strength', 0) * 1.1,
                         'risk_reward': (take_profit - entry_price) / (entry_price - stop_loss),
                         'gap_size': f"{fvg.get('gap_size', 0):.4f}",
+                        'reaction_candle': True,
                         'total_score': fvg.get('strength', 0) * self.scenario_weights['fvg_fill']
                     }
                     scenarios.append(scenario)
@@ -1438,7 +1810,7 @@ class EntryScenario:
                     # دخول بيع من Bearish FVG
                     entry_type = 'SELL'
                     stop_loss = fvg_range[1] * 1.005
-                    take_profit = fvg_range[0] * 0.995
+                    take_profit = fvg_range[0] * 0.99
                     
                     scenario = {
                         'type': 'BEARISH_FVG_FILL',
@@ -1446,9 +1818,10 @@ class EntryScenario:
                         'entry_price': entry_price,
                         'stop_loss': stop_loss,
                         'take_profit': take_profit,
-                        'confidence': fvg.get('strength', 0),
+                        'confidence': fvg.get('strength', 0) * 1.1,
                         'risk_reward': (entry_price - take_profit) / (stop_loss - entry_price),
                         'gap_size': f"{fvg.get('gap_size', 0):.4f}",
+                        'reaction_candle': True,
                         'total_score': fvg.get('strength', 0) * self.scenario_weights['fvg_fill']
                     }
                     scenarios.append(scenario)
@@ -1467,11 +1840,27 @@ class EntryScenario:
                 stop_loss = 0
                 take_profit = 0
                 
+                # 🔴 شرط: السحب قوي (intensity > 2)
+                if liq.get('intensity', 1) <= 2:
+                    continue
+                
+                # 🔴 تأكيد: شمعة رد فعل بعد السحب
+                if len(candles) >= 2:
+                    current_candle = candles[-1]
+                    sweep_direction = liq.get('direction')
+                    
+                    if sweep_direction == 'UP':  # سحب صعودي
+                        if not (current_candle['close'] < current_candle['open']):  # شمعة حمراء
+                            continue
+                    else:  # سحب هابط
+                        if not (current_candle['close'] > current_candle['open']):  # شمعة خضراء
+                            continue
+                
                 # دخول بعد سحب سيولة صعودي (للبيع)
-                if liq.get('direction') == 'UP' and liq.get('intensity', 1) > 1.5:
+                if liq.get('direction') == 'UP':
                     entry_type = 'SELL'
-                    stop_loss = liq['price'] * 1.005
-                    take_profit = entry_price * 0.985
+                    stop_loss = liq['price'] * 1.01
+                    take_profit = entry_price * 0.98
                     
                     scenario = {
                         'type': 'POST_SWEEP_SELL',
@@ -1479,18 +1868,19 @@ class EntryScenario:
                         'entry_price': entry_price,
                         'stop_loss': stop_loss,
                         'take_profit': take_profit,
-                        'confidence': min(liq.get('intensity', 1) / 3, 0.9),
+                        'confidence': min(liq.get('intensity', 1) / 4, 0.8),
                         'risk_reward': (entry_price - take_profit) / (stop_loss - entry_price),
                         'sweep_intensity': liq.get('intensity', 1),
-                        'total_score': min(liq.get('intensity', 1) / 3, 0.9) * self.scenario_weights['liquidity_sweep']
+                        'reaction_candle': True,
+                        'total_score': min(liq.get('intensity', 1) / 4, 0.8) * self.scenario_weights['liquidity_sweep']
                     }
                     scenarios.append(scenario)
                 
                 # دخول بعد سحب سيولة هابط (للشراء)
-                elif liq.get('direction') == 'DOWN' and liq.get('intensity', 1) > 1.5:
+                elif liq.get('direction') == 'DOWN':
                     entry_type = 'BUY'
-                    stop_loss = liq['price'] * 0.995
-                    take_profit = entry_price * 1.015
+                    stop_loss = liq['price'] * 0.99
+                    take_profit = entry_price * 1.02
                     
                     scenario = {
                         'type': 'POST_SWEEP_BUY',
@@ -1498,10 +1888,11 @@ class EntryScenario:
                         'entry_price': entry_price,
                         'stop_loss': stop_loss,
                         'take_profit': take_profit,
-                        'confidence': min(liq.get('intensity', 1) / 3, 0.9),
+                        'confidence': min(liq.get('intensity', 1) / 4, 0.8),
                         'risk_reward': (take_profit - entry_price) / (entry_price - stop_loss),
                         'sweep_intensity': liq.get('intensity', 1),
-                        'total_score': min(liq.get('intensity', 1) / 3, 0.9) * self.scenario_weights['liquidity_sweep']
+                        'reaction_candle': True,
+                        'total_score': min(liq.get('intensity', 1) / 4, 0.8) * self.scenario_weights['liquidity_sweep']
                     }
                     scenarios.append(scenario)
         
@@ -1524,12 +1915,18 @@ class EntryScenario:
                 zone_price = zone.get('price_level', 0)
                 distance_pct = abs(current_price - zone_price) / current_price
                 
-                # إذا كان السعر قريب من منطقة طلب قوية
-                if distance_pct < 0.005 and zone.get('strength', 0) > 0.7:
+                # 🔴 إذا كان السعر قريب من منطقة طلب قوية (ضمن 0.3%)
+                if distance_pct < 0.003 and zone.get('strength', 0) > 0.7:
+                    # 🔴 تأكيد: شمعة رد فعل صعودية
+                    if len(candles) >= 2:
+                        current_candle = candles[-1]
+                        if not (current_candle['close'] > current_candle['open']):
+                            continue
+                    
                     entry_type = 'BUY'
                     entry_price = current_price
                     stop_loss = zone_price * 0.995
-                    take_profit = entry_price * 1.015
+                    take_profit = entry_price * 1.02  # هدف 2%
                     
                     scenario = {
                         'type': 'BULLISH_CORRECTION_BUY',
@@ -1537,10 +1934,11 @@ class EntryScenario:
                         'entry_price': entry_price,
                         'stop_loss': stop_loss,
                         'take_profit': take_profit,
-                        'confidence': zone.get('strength', 0),
+                        'confidence': zone.get('strength', 0) * 0.9,
                         'risk_reward': (take_profit - entry_price) / (entry_price - stop_loss),
                         'zone_strength': zone.get('strength', 0),
                         'test_count': zone.get('test_count', 0),
+                        'reaction_candle': True,
                         'total_score': zone.get('strength', 0) * self.scenario_weights['correction_entry']
                     }
                     scenarios.append(scenario)
@@ -1553,12 +1951,18 @@ class EntryScenario:
                 zone_price = zone.get('price_level', 0)
                 distance_pct = abs(current_price - zone_price) / current_price
                 
-                # إذا كان السعر قريب من منطقة عرض قوية
-                if distance_pct < 0.005 and zone.get('strength', 0) > 0.7:
+                # 🔴 إذا كان السعر قريب من منطقة عرض قوية (ضمن 0.3%)
+                if distance_pct < 0.003 and zone.get('strength', 0) > 0.7:
+                    # 🔴 تأكيد: شمعة رد فعل هابطة
+                    if len(candles) >= 2:
+                        current_candle = candles[-1]
+                        if not (current_candle['close'] < current_candle['open']):
+                            continue
+                    
                     entry_type = 'SELL'
                     entry_price = current_price
                     stop_loss = zone_price * 1.005
-                    take_profit = entry_price * 0.985
+                    take_profit = entry_price * 0.98  # هدف 2%
                     
                     scenario = {
                         'type': 'BEARISH_CORRECTION_SELL',
@@ -1566,10 +1970,11 @@ class EntryScenario:
                         'entry_price': entry_price,
                         'stop_loss': stop_loss,
                         'take_profit': take_profit,
-                        'confidence': zone.get('strength', 0),
+                        'confidence': zone.get('strength', 0) * 0.9,
                         'risk_reward': (entry_price - take_profit) / (stop_loss - entry_price),
                         'zone_strength': zone.get('strength', 0),
                         'test_count': zone.get('test_count', 0),
+                        'reaction_candle': True,
                         'total_score': zone.get('strength', 0) * self.scenario_weights['correction_entry']
                     }
                     scenarios.append(scenario)
@@ -1581,9 +1986,12 @@ class EntryScenario:
         rank_icon = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"][min(rank-1, 4)]
         entry_icon = "🟢" if scenario['entry_type'] == 'BUY' else "🔴"
         
+        validated_mark = "✅" if scenario.get('validated', False) else "❌"
+        
         print(
             f"{AdvancedConsoleColors.FG.CYAN}{rank_icon} "
-            f"{AdvancedConsoleColors.BOLD}{scenario['type']}{AdvancedConsoleColors.RESET} | "
+            f"{AdvancedConsoleColors.BOLD}{scenario['type']}{AdvancedConsoleColors.RESET} "
+            f"{validated_mark} | "
             f"{entry_icon} {scenario['entry_type']} @ {scenario['entry_price']:.4f} | "
             f"{AdvancedConsoleColors.FG.YELLOW}SL: {scenario['stop_loss']:.4f}{AdvancedConsoleColors.RESET} | "
             f"{AdvancedConsoleColors.FG.GREEN}TP: {scenario['take_profit']:.4f}{AdvancedConsoleColors.RESET} | "
@@ -1867,14 +2275,20 @@ class AdvancedTradeProtector:
 # ============================================
 
 class EnhancedTradeManager:
-    """مدير الصفقات المحسن مع دعم SMC"""
+    """مدير الصفقات المحسن مع دعم SMC وإدارة الرصيد"""
     
-    def __init__(self, exchange, symbol: str, risk_percent: float = 0.6, 
+    def __init__(self, exchange, symbol: str, initial_balance: float = INITIAL_BALANCE,
+                 risk_percent: float = RISK_PERCENT, 
                  logger: EnhancedProConsoleLogger = None):
         self.exchange = exchange
         self.symbol = symbol
         self.risk_percent = risk_percent
         self.logger = logger or EnhancedProConsoleLogger()
+        
+        # 🆕 إدارة الرصيد
+        self.initial_balance = initial_balance
+        self.current_balance = initial_balance
+        self.cumulative_pnl = 0.0
         
         # الأنظمة الفرعية
         self.smc_analyzer = AdvancedSMCAnalyzer(logger)
@@ -1893,6 +2307,30 @@ class EnhancedTradeManager:
             'worst_trade': 0.0,
             'avg_win': 0.0,
             'avg_loss': 0.0
+        }
+    
+    def update_balance(self, pnl_usd: float):
+        """تحديث الرصيد والربح التراكمي"""
+        self.current_balance += pnl_usd
+        self.cumulative_pnl += pnl_usd
+        
+        # تسجيل الرصيد
+        self.logger.log_balance(
+            balance=self.current_balance,
+            pnl=self.cumulative_pnl,
+            initial_balance=self.initial_balance
+        )
+    
+    def get_balance_summary(self) -> Dict[str, Any]:
+        """الحصول على ملخص الرصيد"""
+        pnl_percent = (self.cumulative_pnl / self.initial_balance) * 100 if self.initial_balance > 0 else 0
+        
+        return {
+            'initial_balance': self.initial_balance,
+            'current_balance': self.current_balance,
+            'cumulative_pnl': self.cumulative_pnl,
+            'pnl_percent': pnl_percent,
+            'roi_percent': (self.current_balance - self.initial_balance) / self.initial_balance * 100 if self.initial_balance > 0 else 0
         }
     
     def analyze_market_for_entry(self, candles: List[Dict]) -> List[Dict]:
@@ -1920,16 +2358,17 @@ class EnhancedTradeManager:
         
         return high_confidence_scenarios[:5]  # أفضل 5 سيناريوهات
     
-    def execute_trade(self, scenario: Dict, balance: float, current_price: float) -> bool:
+    def execute_trade(self, scenario: Dict, current_price: float) -> bool:
         """تنفيذ صفقة بناءً على السيناريو"""
         if self.active_trade:
             self.logger.file_logger.warning("Cannot execute trade: Active trade exists")
             return False
         
         # حساب حجم المركز
-        position_size = self._calculate_position_size(balance, current_price, scenario['confidence'])
+        position_size = self._calculate_position_size(self.current_balance, current_price, scenario['confidence'])
         
         if position_size <= 0:
+            self.logger.log_system(f"Position size too small: {position_size}", "WARNING")
             return False
         
         # تسجيل الصفقة
@@ -1941,6 +2380,7 @@ class EnhancedTradeManager:
             'side': scenario['entry_type'],
             'entry_price': current_price,
             'position_size': position_size,
+            'position_value': position_size * current_price,
             'stop_loss': scenario['stop_loss'],
             'take_profit': scenario['take_profit'],
             'confidence': scenario['confidence'],
@@ -2010,10 +2450,16 @@ class EnhancedTradeManager:
         # حساب الكمية
         raw_qty = adjusted_capital / entry_price
         
-        # هنا يمكن إضافة منطق تنقية الكمية حسب المنصة
-        # (مأخوذ من الكود الأصلي)
+        # تقريب للكمية المناسبة
+        qty = round(raw_qty, 4)  # تقريب لأربعة منازل عشرية
         
-        return raw_qty
+        # الحد الأدنى للكمية
+        min_qty = 0.001  # الحد الأدنى للكمية
+        if qty < min_qty:
+            self.logger.log_system(f"Position size below minimum: {qty} < {min_qty}", "WARNING")
+            return 0
+        
+        return qty
     
     def _place_order(self, side: str, quantity: float, price: float) -> bool:
         """وضع أمر (محاكاة)"""
@@ -2027,6 +2473,8 @@ class EnhancedTradeManager:
     def _log_trade_entry(self, scenario: Dict, entry_price: float, position_size: float):
         """تسجيل دخول الصفقة"""
         side_icon = "🟢" if scenario['entry_type'] == 'BUY' else "🔴"
+        position_value = position_size * entry_price
+        risk_percent = abs((scenario['stop_loss'] - entry_price) / entry_price * 100)
         
         print(
             f"\n{AdvancedConsoleColors.BG.LIGHT_BLACK}{'='*80}{AdvancedConsoleColors.RESET}"
@@ -2036,11 +2484,12 @@ class EnhancedTradeManager:
             f"🎯 TRADE ENTERED{AdvancedConsoleColors.RESET} | "
             f"{side_icon} {scenario['entry_type']} | "
             f"Price: {entry_price:.4f} | "
-            f"Size: {position_size:.4f}"
+            f"Size: {position_size:.4f} | "
+            f"Value: {position_value:.2f} USDT"
         )
         print(
             f"{AdvancedConsoleColors.FG.YELLOW}SL: {scenario['stop_loss']:.4f} "
-            f"({abs((scenario['stop_loss'] - entry_price)/entry_price*100):.2f}%){AdvancedConsoleColors.RESET} | "
+            f"({risk_percent:.2f}%){AdvancedConsoleColors.RESET} | "
             f"{AdvancedConsoleColors.FG.GREEN}TP: {scenario['take_profit']:.4f} "
             f"({abs((scenario['take_profit'] - entry_price)/entry_price*100):.2f}%){AdvancedConsoleColors.RESET}"
         )
@@ -2131,13 +2580,28 @@ class EnhancedTradeManager:
         exit_size = current_size * exit_percent
         remaining_size = current_size - exit_size
         
+        # حساب الربح/الخسارة للجزء المخرج
+        entry_price = self.current_trade['entry_price']
+        side = self.current_trade['side']
+        
+        if side == 'BUY':
+            partial_pnl = (exit_price - entry_price) * exit_size
+        else:
+            partial_pnl = (entry_price - exit_price) * exit_size
+        
+        # تحديث الرصيد
+        self.update_balance(partial_pnl)
+        
         self.current_trade['position_size'] = remaining_size
         
         # تسجيل الخروج الجزئي
+        pnl_color = AdvancedConsoleColors.FG.GREEN if partial_pnl >= 0 else AdvancedConsoleColors.FG.RED
+        
         print(
             f"{AdvancedConsoleColors.FG.YELLOW}🔄 PARTIAL EXIT | "
-            f"Closed {exit_percent*100:.0f}% @ {exit_price:.4f} | "
-            f"Reason: {reason}{AdvancedConsoleColors.RESET}"
+            f"Closed {exit_percent*100:.0f}% ({exit_size:.4f}) @ {exit_price:.4f} | "
+            f"PnL: {pnl_color}{partial_pnl:+.2f} USDT{AdvancedConsoleColors.RESET} | "
+            f"Reason: {reason}"
         )
     
     def _update_stop_loss(self, new_stop: float, reason: str):
@@ -2174,6 +2638,9 @@ class EnhancedTradeManager:
         else:
             pnl_pct = (entry_price - exit_price) / entry_price * 100
             pnl_usd = (entry_price - exit_price) * position_size
+        
+        # تحديث الرصيد
+        self.update_balance(pnl_usd)
         
         # تحديث سجل الصفقة
         trade['exit_price'] = exit_price
@@ -2235,6 +2702,7 @@ class EnhancedTradeManager:
     def get_performance_report(self) -> Dict[str, Any]:
         """الحصول على تقرير الأداء"""
         metrics = self.performance_metrics
+        balance_summary = self.get_balance_summary()
         
         if metrics['total_trades'] > 0:
             win_rate = (metrics['winning_trades'] / metrics['total_trades']) * 100
@@ -2244,6 +2712,7 @@ class EnhancedTradeManager:
             avg_trade = 0.0
         
         return {
+            'balance_summary': balance_summary,
             'total_trades': metrics['total_trades'],
             'winning_trades': metrics['winning_trades'],
             'losing_trades': metrics['total_trades'] - metrics['winning_trades'],
@@ -2263,23 +2732,71 @@ class EnhancedTradeManager:
 # ============================================
 
 class SUIUltraProAIEnhanced:
-    """البوت المحسن مع نظام SMC المتكامل"""
+    """البوت المحسن مع نظام SMC المتكامل وإدارة الرصيد"""
     
-    def __init__(self):
+    def __init__(self, symbol: str = SYMBOL, interval: str = INTERVAL,
+                 initial_balance: float = INITIAL_BALANCE,
+                 risk_percent: float = RISK_PERCENT):
+        
         self.logger = EnhancedProConsoleLogger()
         self.exchange = None
+        self.symbol = symbol
+        self.interval = interval
+        self.initial_balance = initial_balance
+        self.risk_percent = risk_percent
         self.trade_manager = None
         self.running = False
         
-        # إعدادات
-        self.symbol = os.getenv("SYMBOL", "SUI/USDT:USDT")
-        self.interval = os.getenv("INTERVAL", "15m")
-        self.risk_percent = float(os.getenv("RISK_ALLOC", "0.60"))
+        # Flask App
+        self.app = Flask(__name__)
+        self.setup_flask_routes()
+    
+    def setup_flask_routes(self):
+        """إعداد مسارات Flask"""
+        @self.app.route('/')
+        def home():
+            return jsonify({
+                'status': 'running',
+                'bot': 'SUI Ultra Pro AI Enhanced',
+                'version': '2.0',
+                'symbol': self.symbol,
+                'interval': self.interval
+            })
         
+        @self.app.route('/status')
+        def status():
+            if not self.trade_manager:
+                return jsonify({'error': 'Trade manager not initialized'}), 500
+            
+            report = self.trade_manager.get_performance_report()
+            return jsonify(report)
+        
+        @self.app.route('/balance')
+        def balance():
+            if not self.trade_manager:
+                return jsonify({'error': 'Trade manager not initialized'}), 500
+            
+            balance_summary = self.trade_manager.get_balance_summary()
+            return jsonify(balance_summary)
+        
+        @self.app.route('/trades')
+        def trades():
+            if not self.trade_manager:
+                return jsonify({'error': 'Trade manager not initialized'}), 500
+            
+            trades_history = self.trade_manager.trades_history if hasattr(self.trade_manager, 'trades_history') else []
+            return jsonify({
+                'total_trades': len(trades_history),
+                'trades': trades_history[-20:]  # آخر 20 صفقة
+            })
+    
     def initialize(self) -> bool:
         """تهيئة البوت"""
         try:
-            self.logger.file_logger.info("Initializing Enhanced SUI Ultra Pro AI Bot")
+            self.logger.log_system("Initializing Enhanced SUI Ultra Pro AI Bot", "INFO")
+            self.logger.log_system(f"Symbol: {self.symbol}, Interval: {self.interval}", "INFO")
+            self.logger.log_system(f"Initial Balance: {self.initial_balance:.2f} USDT", "INFO")
+            self.logger.log_system(f"Risk Percent: {self.risk_percent*100:.1f}%", "INFO")
             
             # تهيئة Exchange (مثال)
             # self.exchange = ccxt.bybit({...})
@@ -2288,15 +2805,16 @@ class SUIUltraProAIEnhanced:
             self.trade_manager = EnhancedTradeManager(
                 exchange=self.exchange,
                 symbol=self.symbol,
+                initial_balance=self.initial_balance,
                 risk_percent=self.risk_percent,
                 logger=self.logger
             )
             
-            self.logger.file_logger.info("Enhanced bot initialized successfully")
+            self.logger.log_system("Enhanced bot initialized successfully", "SUCCESS")
             return True
             
         except Exception as e:
-            self.logger.file_logger.error(f"Failed to initialize bot: {str(e)}", exc_info=True)
+            self.logger.log_error("Failed to initialize bot", e, "Initialization")
             return False
     
     def fetch_candles(self, limit: int = 100) -> List[Dict]:
@@ -2322,21 +2840,37 @@ class SUIUltraProAIEnhanced:
         
         return candles
     
-    def run(self):
-        """تشغيل البوت"""
-        self.logger.file_logger.info("Starting Enhanced SUI Ultra Pro AI Bot")
+    def run_trade_loop(self):
+        """تشغيل حلقة التداول الرئيسية"""
+        self.logger.log_system("Starting Enhanced SUI Ultra Pro AI Bot Trading Loop", "INFO")
         self.running = True
+        
+        iteration_count = 0
         
         while self.running:
             try:
+                iteration_count += 1
+                
                 # جلب بيانات الشموع
                 candles = self.fetch_candles(100)
                 
                 if not candles or len(candles) < 50:
+                    self.logger.log_system("Waiting for more candle data...", "INFO")
                     time.sleep(5)
                     continue
                 
                 current_price = candles[-1]['close']
+                
+                # عرض السعر الحالي كل 10 دورات
+                if iteration_count % 10 == 0:
+                    price_color = AdvancedConsoleColors.FG.GREEN if candles[-1]['close'] > candles[-1]['open'] else AdvancedConsoleColors.FG.RED
+                    price_icon = "📈" if candles[-1]['close'] > candles[-1]['open'] else "📉"
+                    
+                    print(
+                        f"{AdvancedConsoleColors.FG.LIGHT_BLACK}[{datetime.now().strftime('%H:%M:%S')}] "
+                        f"{price_icon} {self.symbol}: {price_color}{current_price:.4f}{AdvancedConsoleColors.RESET} | "
+                        f"Volume: {candles[-1]['volume']:.0f}"
+                    )
                 
                 # إذا كانت هناك صفقة نشطة
                 if self.trade_manager.active_trade:
@@ -2351,78 +2885,170 @@ class SUIUltraProAIEnhanced:
                         # اختيار أفضل سيناريو
                         best_scenario = entry_scenarios[0]
                         
-                        # تنفيذ الصفقة (رصيد محاكى)
-                        balance = 1000.0  # رصيد محاكى
-                        
+                        # تنفيذ الصفقة إذا كان السيناريو جيد
                         if best_scenario['confidence'] > 0.75:
+                            self.logger.log_system(f"Executing trade with confidence: {best_scenario['confidence']:.2f}", "INFO")
                             self.trade_manager.execute_trade(
                                 scenario=best_scenario,
-                                balance=balance,
                                 current_price=current_price
                             )
                 
-                # عرض الأداء كل 10 دورات
-                if int(time.time()) % 60 < 5:  # كل دقيقة تقريباً
-                    self._display_performance()
+                # عرض أداء المحفظة كل 30 دورة
+                if iteration_count % 30 == 0:
+                    self._display_portfolio_performance()
                 
                 time.sleep(10)  # انتظار 10 ثواني بين الدورات
                 
             except KeyboardInterrupt:
-                self.logger.file_logger.info("Bot stopped by user")
+                self.logger.log_system("Trading loop stopped by user", "INFO")
                 self.running = False
                 break
                 
             except Exception as e:
-                self.logger.file_logger.error(f"Error in main loop: {str(e)}", exc_info=True)
+                self.logger.log_error("Error in trading loop", e, "Trade Loop")
                 time.sleep(30)  # انتظار أطول عند الخطأ
     
-    def _display_performance(self):
-        """عرض أداء البوت"""
+    def _display_portfolio_performance(self):
+        """عرض أداء المحفظة"""
         if not self.trade_manager:
             return
         
         report = self.trade_manager.get_performance_report()
+        balance_summary = report['balance_summary']
         
-        print(f"\n{AdvancedConsoleColors.BG.LIGHT_BLACK}{'='*60}{AdvancedConsoleColors.RESET}")
-        print(f"{AdvancedConsoleColors.BOLD}{AdvancedConsoleColors.FG.CYAN}📊 PERFORMANCE REPORT{AdvancedConsoleColors.RESET}")
-        print(f"{AdvancedConsoleColors.BG.LIGHT_BLACK}{'-'*60}{AdvancedConsoleColors.RESET}")
-        print(f"Total Trades: {report['total_trades']}")
-        print(f"Win Rate: {report['win_rate']:.1f}% ({report['winning_trades']}/{report['total_trades']})")
-        print(f"Total P&L: {AdvancedConsoleColors.FG.GREEN if report['total_pnl_pct'] > 0 else AdvancedConsoleColors.FG.RED}"
-              f"{report['total_pnl_pct']:+.2f}%{AdvancedConsoleColors.RESET}")
-        print(f"Avg Trade: {report['avg_trade_pct']:+.2f}%")
-        print(f"Best Trade: {AdvancedConsoleColors.FG.GREEN}{report['best_trade_pct']:+.2f}%{AdvancedConsoleColors.RESET}")
-        print(f"Worst Trade: {AdvancedConsoleColors.FG.RED}{report['worst_trade_pct']:+.2f}%{AdvancedConsoleColors.RESET}")
-        print(f"Active Trade: {'Yes' if report['active_trade'] else 'No'}")
-        print(f"{AdvancedConsoleColors.BG.LIGHT_BLACK}{'='*60}{AdvancedConsoleColors.RESET}\n")
+        # خط فاصل
+        separator = f"{AdvancedConsoleColors.BG.LIGHT_BLACK}{'='*70}{AdvancedConsoleColors.RESET}"
+        
+        print(f"\n{separator}")
+        print(f"{AdvancedConsoleColors.BOLD}{AdvancedConsoleColors.FG.CYAN}📊 PORTFOLIO PERFORMANCE{AdvancedConsoleColors.RESET}")
+        print(f"{AdvancedConsoleColors.BG.LIGHT_BLACK}{'-'*70}{AdvancedConsoleColors.RESET}")
+        
+        # رصيد المحفظة
+        print(
+            f"{AdvancedConsoleColors.FG.LIGHT_BLUE}💰 Balance:{AdvancedConsoleColors.RESET} "
+            f"{balance_summary['current_balance']:,.2f} USDT | "
+            f"{AdvancedConsoleColors.FG.GREEN if balance_summary['pnl_percent'] >= 0 else AdvancedConsoleColors.FG.RED}"
+            f"Cumulative P&L: {balance_summary['cumulative_pnl']:+,.2f} USDT ({balance_summary['pnl_percent']:+.2f}%){AdvancedConsoleColors.RESET}"
+        )
+        
+        # أداء التداول
+        win_rate_color = AdvancedConsoleColors.FG.GREEN if report['win_rate'] >= 60 else AdvancedConsoleColors.FG.YELLOW if report['win_rate'] >= 50 else AdvancedConsoleColors.FG.RED
+        
+        print(
+            f"{AdvancedConsoleColors.FG.MAGENTA}📈 Trading Performance:{AdvancedConsoleColors.RESET} "
+            f"Trades: {report['total_trades']} | "
+            f"Win Rate: {win_rate_color}{report['win_rate']:.1f}%{AdvancedConsoleColors.RESET} | "
+            f"Total P&L: {AdvancedConsoleColors.FG.GREEN if report['total_pnl_pct'] >= 0 else AdvancedConsoleColors.FG.RED}"
+            f"{report['total_pnl_pct']:+.2f}%{AdvancedConsoleColors.RESET}"
+        )
+        
+        # تفاصيل إضافية
+        if report['total_trades'] > 0:
+            print(
+                f"{AdvancedConsoleColors.FG.YELLOW}📊 Details:{AdvancedConsoleColors.RESET} "
+                f"Avg Trade: {report['avg_trade_pct']:+.2f}% | "
+                f"Best: {AdvancedConsoleColors.FG.GREEN}{report['best_trade_pct']:+.2f}%{AdvancedConsoleColors.RESET} | "
+                f"Worst: {AdvancedConsoleColors.FG.RED}{report['worst_trade_pct']:+.2f}%{AdvancedConsoleColors.RESET}"
+            )
+        
+        # الصفقة النشطة
+        active_status = f"{AdvancedConsoleColors.FG.GREEN}✅ Active" if report['active_trade'] else f"{AdvancedConsoleColors.FG.RED}❌ Inactive"
+        print(f"{AdvancedConsoleColors.FG.CYAN}🔄 Active Trade:{AdvancedConsoleColors.RESET} {active_status}{AdvancedConsoleColors.RESET}")
+        
+        print(separator)
+        
+        # تسجيل في اللوجر
+        self.logger.log_portfolio_summary(
+            total_trades=report['total_trades'],
+            win_rate=report['win_rate'],
+            total_pnl=report['total_pnl_pct'],
+            active_trade=report['active_trade']
+        )
     
     def stop(self):
         """إيقاف البوت"""
         self.running = False
-        self.logger.file_logger.info("Bot stopped")
+        self.logger.log_system("Bot stopped", "INFO")
+
+# ============================================
+#  FLASK APP SETUP - إعداد تطبيق Flask
+# ============================================
+
+app = Flask(__name__)
+
+# إنشاء كائن البوت
+bot_instance = None
+
+@app.route('/')
+def home():
+    return jsonify({
+        'status': 'running',
+        'bot': 'SUI Ultra Pro AI Enhanced',
+        'version': '2.0',
+        'symbol': SYMBOL,
+        'interval': INTERVAL,
+        'port': PORT
+    })
+
+@app.route('/health')
+def health():
+    return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
 
 # ============================================
 #  EXECUTION - التنفيذ
 # ============================================
 
 if __name__ == "__main__":
-    # عرض بانر البداية
-    print(f"\n{AdvancedConsoleColors.FG.CYAN}{'='*80}{AdvancedConsoleColors.RESET}")
-    print(f"{AdvancedConsoleColors.BOLD}{AdvancedConsoleColors.FG.LIGHT_MAGENTA}")
-    print("🚀 SUI ULTRA PRO AI - ENHANCED SMC EDITION")
-    print("⚡ Smart Money Concepts Fully Integrated")
-    print("🎯 7 Entry Scenarios | Advanced Protection System")
-    print(f"{AdvancedConsoleColors.RESET}")
-    print(f"{AdvancedConsoleColors.FG.CYAN}{'='*80}{AdvancedConsoleColors.RESET}\n")
-    
-    # تشغيل البوت
-    bot = SUIUltraProAIEnhanced()
-    
-    if bot.initialize():
-        try:
-            bot.run()
-        except KeyboardInterrupt:
-            bot.stop()
-            print(f"\n{AdvancedConsoleColors.FG.YELLOW}Bot stopped by user.{AdvancedConsoleColors.RESET}")
-    else:
-        print(f"{AdvancedConsoleColors.FG.RED}Failed to initialize bot.{AdvancedConsoleColors.RESET}")
+    try:
+        logger.log_system("🚀 SUI ULTRA PRO AI - ENHANCED SMC EDITION", "INFO")
+        logger.log_system("⚡ Smart Money Concepts Fully Integrated", "INFO")
+        logger.log_system("🎯 7 Entry Scenarios | Advanced Protection System | Balance Management", "INFO")
+        logger.log_system(f"Initial Balance: {INITIAL_BALANCE:.2f} USDT | Risk: {RISK_PERCENT*100:.1f}%", "INFO")
+        logger.log_system("="*60, "INFO")
+        
+        # إنشاء البوت
+        bot_instance = SUIUltraProAIEnhanced(
+            symbol=SYMBOL,
+            interval=INTERVAL,
+            initial_balance=INITIAL_BALANCE,
+            risk_percent=RISK_PERCENT
+        )
+        
+        # تهيئة البوت
+        if not bot_instance.initialize():
+            logger.log_system("Failed to initialize bot. Exiting...", "ERROR")
+            sys.exit(1)
+        
+        # تشغيل حلقة التداول في Thread منفصل
+        trade_thread = threading.Thread(
+            target=bot_instance.run_trade_loop,
+            daemon=True
+        )
+        trade_thread.start()
+        
+        logger.log_system(f"Starting Flask server on port {PORT}", "INFO")
+        logger.log_system(f"API Endpoints:", "INFO")
+        logger.log_system(f"  • http://localhost:{PORT}/ - Home", "INFO")
+        logger.log_system(f"  • http://localhost:{PORT}/status - Bot Status", "INFO")
+        logger.log_system(f"  • http://localhost:{PORT}/balance - Balance Summary", "INFO")
+        logger.log_system(f"  • http://localhost:{PORT}/trades - Recent Trades", "INFO")
+        logger.log_system(f"  • http://localhost:{PORT}/health - Health Check", "INFO")
+        
+        # تشغيل Flask Server
+        app.run(
+            host="0.0.0.0",
+            port=PORT,
+            debug=False,
+            use_reloader=False
+        )
+        
+    except KeyboardInterrupt:
+        logger.log_system("Bot stopped by user", "INFO")
+        
+    except Exception as e:
+        logger.log_error(f"Fatal error in main: {str(e)}", e, "Main Execution")
+        
+    finally:
+        if bot_instance:
+            bot_instance.stop()
+        logger.log_system("Bot shutdown complete", "INFO")
